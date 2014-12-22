@@ -35,7 +35,7 @@
 
 #include "Arduino.h"
 
-#define MAX_TASKS 16
+#define MAX_TASKS 32
 
 #ifdef __cplusplus
 extern "C" {
@@ -47,8 +47,8 @@ extern "C" {
 }
 #endif
 #define TYPE uint32_t scratch = 0
-#define TASK_LOCK(lock) \
-for ( TYPE, __ToDo = sys_acquire_lock( &lock );  __ToDo;  __ToDo = sys_release_lock( &lock ))
+#define TASK_LOCK( lock ) \
+for ( TYPE, __ToDo = sys_acquire_lock( &lock );  __ToDo;  __ToDo = sys_release_lock( &lock ) )
 
 typedef void ( * task_func_t )( void *arg );
 typedef void ( * loop_func_t )( void );
