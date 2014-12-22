@@ -7,9 +7,6 @@
  || @author 	Warren Gay
  || @contact 	VE3WWG
  ||
- || @description
- || This is a very light weight fibers (aka coroutines) library,
- || managed by a singular instance of class Fibers.
  ||
  || @license
  || | Copyright (c) 2014 Colin Duffy, (C) Warren Gay VE3WWG
