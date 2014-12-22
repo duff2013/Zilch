@@ -1,0 +1,31 @@
+#######################################
+# Syntax Coloring Map Zilch
+#######################################
+
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+Zilch	KEYWORD1
+zilch	KEYWORD1
+create	KEYWORD1
+current	KEYWORD1
+yield	KEYWORD1
+state	KEYWORD1
+sync	KEYWORD1
+pause	KEYWORD1
+resume	KEYWORD1
+restart	KEYWORD1
+size	KEYWORD1
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+TaskState		KEYWORD2
+TASK_LOCK		KEYWORD2
+TaskUseInterrupt	KEYWORD2
+#######################################
+# Instances (KEYWORD2)
+#######################################
+arg	KEYWORD2
+#######################################
+# Constants (LITERAL1)
+#######################################
