@@ -54,7 +54,6 @@ Zilch::Zilch( uint16_t main_stack_size, const uint32_t pattern ) {
     NVIC_SET_PRIORITY(IRQ_SOFTWARE, 0xFF); // 0xFF = lowest priority
     NVIC_ENABLE_IRQ(IRQ_SOFTWARE);
     init_stack( main_stack_size, pattern );
-    pinMode(LED_BUILTIN, OUTPUT);
 }
 
 TaskState Zilch::create( task_func_t task, size_t stack_size, volatile void *arg ) {
