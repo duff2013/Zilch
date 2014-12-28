@@ -92,18 +92,17 @@ typedef enum  {
     PAUSE,
     RESUME,
     RESTART,
-    SYNC,
     TASK_STATE,
     MAIN_STATE,
-    SIZE
+    MEMORY
 }calling_func_t;
 calling_func_t CALLING_FUNCTION;
 task_func_t FUNCTION;
 enum TaskState _STATE;
+uint32_t STACK_MEMORY;
 //////////////////////////////////////////////////////////////////////
 // Initialize main stack
 //////////////////////////////////////////////////////////////////////
-//#define IOPIN0  (*((volatile unsigned long *) 0x20007b64))
 void init_stack( uint32_t main_stack, uint32_t pattern_override ) {
     num_task = 0;
     psp_fill_pattern = pattern_override;
@@ -283,7 +282,7 @@ void task_swap( volatile stack_frame_t *prevframe, volatile stack_frame_t *nextf
     asm volatile (
                   "MRS %[result], MSP\n"
                   : [result] "=r" ( prevframe->sp )
-                  );
+                 );
 
     asm volatile (
                   "ADD r0, #4"             "\n\t"   // &prevframe->r2
@@ -291,7 +290,7 @@ void task_swap( volatile stack_frame_t *prevframe, volatile stack_frame_t *nextf
                   "LDMFD r1,{r1-r12,lr}"   "\n\t"   // Restore r1(sp) and r2-r12, lr
                   "MSR MSP, r1"            "\n\t"   // Set new sp
                   "BX lr"                  "\n"
-                  );
+                 );
 }
 //////////////////////////////////////////////////////////////////////
 // all invocations of yield in teensyduino api go through this now.
@@ -337,14 +336,14 @@ void yield( void ) {
 enum TaskState task_state( task_func_t func ) {
     FUNCTION = func;
     CALLING_FUNCTION = TASK_STATE;
-    NVIC_SET_PENDING(IRQ_SOFTWARE);
+    NVIC_SET_PENDING( IRQ_SOFTWARE );
     while( update_in_progress ) ;
     return _STATE;
 }
 enum TaskState main_state( loop_func_t func ) {
     FUNCTION = func;
     CALLING_FUNCTION = MAIN_STATE;
-    NVIC_SET_PENDING(IRQ_SOFTWARE);
+    NVIC_SET_PENDING( IRQ_SOFTWARE );
     while( update_in_progress ) ;
     return _STATE;
 }
@@ -369,7 +368,7 @@ enum TaskState task_restart( task_func_t func ) {
     FUNCTION = func;
     CALLING_FUNCTION = RESTART;
     update_in_progress = true;
-    NVIC_SET_PENDING(IRQ_SOFTWARE);
+    NVIC_SET_PENDING( IRQ_SOFTWARE );
     while( update_in_progress ) ;
     return _STATE;
 }
@@ -381,7 +380,7 @@ enum TaskState task_pause( task_func_t func ) {
     FUNCTION = func;
     CALLING_FUNCTION = PAUSE;
     update_in_progress = true;
-    NVIC_SET_PENDING(IRQ_SOFTWARE);
+    NVIC_SET_PENDING( IRQ_SOFTWARE );
     while( update_in_progress ) ;
     return _STATE;
 }
@@ -393,29 +392,23 @@ enum TaskState task_resume( task_func_t func ) {
     FUNCTION = func;
     CALLING_FUNCTION = RESUME;
     update_in_progress = true;
-    NVIC_SET_PENDING(IRQ_SOFTWARE);
+    NVIC_SET_PENDING( IRQ_SOFTWARE );
     while( update_in_progress ) ;
     return _STATE;
 }
 //////////////////////////////////////////////////////////////////////
 // TODO: return task unused size, not working yet
 //////////////////////////////////////////////////////////////////////
-uint32_t* task_size( task_func_t func ) {
-    uint32_t* tmp;
-    task_func_t *f_ptr;
-    int i = 0;
-    do {
-        volatile stack_frame_t *p = &process_tasks[i];
-        f_ptr = p->func_ptr;
-        if ( i >= num_task ) return TaskInvalid;
-        i++;
-    } while ( func != f_ptr  );
-    volatile stack_frame_t *p = &process_tasks[i-1];
-    
-    return p->initial_sp;
+uint32_t task_memory( task_func_t func ) {
+    FUNCTION = func;
+    CALLING_FUNCTION = MEMORY;
+    update_in_progress = true;
+    NVIC_SET_PENDING( IRQ_SOFTWARE );
+    while( update_in_progress ) ;
+    return STACK_MEMORY;
 }
 
-uint32_t* main_size( loop_func_t func ) {
+uint32_t main_memory( loop_func_t func ) {
     volatile stack_frame_t *p = &process_tasks[0];
     return p->initial_sp;
 }
@@ -423,24 +416,24 @@ uint32_t* main_size( loop_func_t func ) {
 // low priority isr to update or change the state of each task
 //////////////////////////////////////////////////////////////////////
 void software_isr(void) {
-    volatile stack_frame_t *p;
     task_func_t *f_ptr;
     enum TaskState state;
     uint32_t num;
     int i = 0;
+    volatile stack_frame_t *p;
+    do {
+        p = &process_tasks[i];
+        f_ptr = p->func_ptr;
+        if ( i >= num_task ) {
+            _STATE = TaskInvalid;
+            update_in_progress = false;
+            return;
+        }
+        i++;
+    } while ( FUNCTION != f_ptr  );
+    /* call function handlers */
     switch ( CALLING_FUNCTION ) {
         case PAUSE:
-            do {
-                p = &process_tasks[i];
-                f_ptr = p->func_ptr;
-                if ( i >= num_task ) {
-                    _STATE = TaskInvalid;
-                    update_in_progress = false;
-                    return;
-                }
-                i++;
-            } while ( FUNCTION != f_ptr  );
-            
             p = &process_tasks[i-1];
             state = p->state;
             if ( state == TaskPause ) {
@@ -456,17 +449,6 @@ void software_isr(void) {
             update_in_progress = false;
             break;
         case RESUME:
-            do {
-                p = &process_tasks[i];
-                f_ptr = p->func_ptr;
-                if ( i >= num_task ) {
-                    _STATE = TaskInvalid;
-                    update_in_progress = false;
-                    return;
-                }
-                i++;
-            } while ( FUNCTION != f_ptr  );
-            
             p = &process_tasks[i-1];
             state = p->state;
             _STATE = state;
@@ -482,17 +464,6 @@ void software_isr(void) {
             update_in_progress = false;
             break;
         case RESTART:
-            do {
-                p = &process_tasks[i];
-                f_ptr = p->func_ptr;
-                if ( i >= num_task ) {
-                    _STATE = TaskInvalid;
-                    update_in_progress = false;
-                    return;
-                }
-                i++;
-            } while ( FUNCTION != f_ptr  );
-            
             p = &process_tasks[i-1];
             state = p->state;
             if ( state != TaskReturned ) {
@@ -500,7 +471,6 @@ void software_isr(void) {
                 update_in_progress = false;
                 break;
             }
-            
             p->state = TaskCreated;
             p->r12 = ( uint32_t )p;
             p->func_ptr = FUNCTION;
@@ -510,17 +480,6 @@ void software_isr(void) {
             update_in_progress = false;
             break;
         case TASK_STATE:
-            do {
-                p = &process_tasks[i];
-                f_ptr = p->func_ptr;
-                if ( i >= num_task ) {
-                    _STATE = TaskInvalid;
-                    update_in_progress = false;
-                    return;
-                }
-                i++;
-            } while ( FUNCTION != f_ptr  );
-            
             p = &process_tasks[i-1];
             _STATE = p->state;
             update_in_progress = false;
@@ -530,8 +489,19 @@ void software_isr(void) {
             _STATE = p->state;
             update_in_progress = false;
             break;
-        case SIZE:
-            
+        case MEMORY:
+            p = &process_tasks[i-1];
+            volatile uint32_t *start = p->initial_sp;
+            volatile const uint32_t *stop = start - (p->stack_size/4);
+            int count = 0;
+            while ( start >= stop ) {
+                __disable_irq();
+                if(*start == 0xFFFFFFFF) count++;
+                start--;
+                __enable_irq();
+            }
+            STACK_MEMORY = (count-1)*4;
+            update_in_progress = false;
             break;
             
         default:

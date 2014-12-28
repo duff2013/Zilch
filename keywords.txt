@@ -15,7 +15,7 @@ sync	KEYWORD1
 pause	KEYWORD1
 resume	KEYWORD1
 restart	KEYWORD1
-size	KEYWORD1
+memory	KEYWORD1
 #######################################
 # Methods and Functions (KEYWORD2)
 #######################################

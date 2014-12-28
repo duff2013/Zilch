@@ -34,22 +34,26 @@
 #define ZILCH_h
 #ifdef __cplusplus
 
+#if( !defined( TEENSYDUINO ) )
+#error "Teensy 3.X Only!!!"
+#endif
+
 #include "Arduino.h"
 #include "utility/task.h"
 
 class Zilch {
 private:
 public:
-    Zilch              ( uint16_t main_stack_size, const uint32_t pattern = 0xA5A5A5A5 ) ;
-    TaskState create   ( task_func_t task, size_t stack_size, volatile void *arg ) ;
-    TaskState pause    ( task_func_t task ) ;
-    TaskState resume   ( task_func_t task ) ;
-    TaskState restart  ( task_func_t task ) ;
-    TaskState sync     ( task_func_t task ) ;
-    TaskState state    ( task_func_t task ) ;
-    TaskState state    ( loop_func_t task ) ;
-    uint32_t* size     ( task_func_t task ) ;
-    uint32_t* size     ( loop_func_t task ) ;
+    Zilch            ( uint16_t main_stack_size, const uint32_t pattern = 0xA5A5A5A5 ) ;
+    TaskState create ( task_func_t task, size_t stack_size, volatile void *arg ) ;
+    TaskState pause  ( task_func_t task ) ;
+    TaskState resume ( task_func_t task ) ;
+    TaskState restart( task_func_t task ) ;
+    TaskState sync   ( task_func_t task ) ;
+    TaskState state  ( task_func_t task ) ;
+    TaskState state  ( loop_func_t task ) ;
+    uint32_t  memory ( task_func_t task ) ;
+    uint32_t  memory ( loop_func_t task ) ;
 };
 #endif
 #endif

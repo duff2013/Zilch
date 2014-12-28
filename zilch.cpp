@@ -44,8 +44,8 @@ extern "C" {
     TaskState  task_restart ( task_func_t func );
     TaskState  task_pause   ( task_func_t func );
     TaskState  task_resume  ( task_func_t func );
-    uint32_t*  task_size    ( task_func_t func );
-    uint32_t*  main_size    ( loop_func_t func );
+    uint32_t   task_memory  ( task_func_t func );
+    uint32_t   main_memory  ( loop_func_t func );
 #ifdef __cplusplus
 }
 #endif
@@ -57,9 +57,8 @@ Zilch::Zilch( uint16_t main_stack_size, const uint32_t pattern ) {
 }
 
 TaskState Zilch::create( task_func_t task, size_t stack_size, volatile void *arg ) {
-    int s_size = stack_size;
     // Round stack size to a word multiple
-    s_size = ( stack_size + sizeof (uint32_t) ) / sizeof (uint32_t) * sizeof (uint32_t);
+    int s_size = ( stack_size + sizeof (uint32_t) ) / sizeof (uint32_t) * sizeof (uint32_t);
     task_create( task, s_size, arg );
 }
 
@@ -93,12 +92,12 @@ TaskState Zilch::restart( task_func_t task ) {
     return p;
 }
 
-uint32_t *Zilch::size( task_func_t task ) {
-    return task_size(task);
+uint32_t Zilch::memory( task_func_t task ) {
+    return task_memory( task );
 }
 
-uint32_t *Zilch::size( loop_func_t task ) {
-    uint32_t* tmp = main_size(task);
-    return tmp;
+uint32_t Zilch::memory( loop_func_t task ) {
+    //uint32_t* tmp = main_size(task);
+    //return tmp;
 }
 
