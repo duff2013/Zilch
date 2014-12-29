@@ -33,7 +33,7 @@
  * the kernel. Uncomment if any ISR calls yield in
  * its handler code.
  **************************************************/
-#define USE_INTERRUPTS
+//#define USE_INTERRUPTS
 
 // Memory fill pattern used to estimate stack usage.
 #define MEMORY_FILL_PATTERN 0XFFFFFFFFUL
@@ -495,10 +495,10 @@ void software_isr(void) {
             volatile const uint32_t *stop = start - (p->stack_size/4);
             int count = 0;
             while ( start >= stop ) {
-                __disable_irq();
+                //__disable_irq();
                 if(*start == 0xFFFFFFFF) count++;
                 start--;
-                __enable_irq();
+                //__enable_irq();
             }
             STACK_MEMORY = (count-1)*4;
             update_in_progress = false;
