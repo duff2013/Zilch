@@ -1,7 +1,7 @@
 /*
  ||
  || @file 		zilch.cpp
- || @version 	0.2
+ || @version 	0.3
  || @author 	Colin Duffy
  || @contact 	cmduffy@engr.psu.edu
  || @author 	Warren Gay
@@ -35,17 +35,16 @@
 #ifdef __cplusplus
 
 #if( !defined( TEENSYDUINO ) )
-#error "Teensy 3.X Only!!!"
+#error "Teensy 3.x & Teensy lc Only!!!"
 #endif
 
-#include "Arduino.h"
 #include "utility/task.h"
 
 class Zilch {
 private:
 public:
     Zilch            ( uint16_t main_stack_size, const uint32_t pattern = 0xA5A5A5A5 ) ;
-    TaskState create ( task_func_t task, size_t stack_size, volatile void *arg ) ;
+    TaskState create ( task_func_t task, size_t stack_size, void *arg ) ;
     TaskState pause  ( task_func_t task ) ;
     TaskState resume ( task_func_t task ) ;
     TaskState restart( task_func_t task ) ;

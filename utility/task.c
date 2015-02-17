@@ -1,7 +1,7 @@
 /*
  ||
  || @file 		task.c
- || @version 	0.2
+ || @version 	0.3
  || @author 	Colin Duffy
  || @contact 	cmduffy@engr.psu.edu
  || @author 	Warren Gay
@@ -44,7 +44,7 @@
 //TODO: use the PSP stack pointer for tasks returns and MSP for ISR returns.
 #define MAIN_RETURN         0xFFFFFFF9  //Tells the handler to return using the MSP
 #define THREAD_RETURN       0xFFFFFFFD //Tells the handler to return using the PSP
-
+#if defined(KINETISK)
 typedef struct {
     // Saved Registers
     uint32_t        sp;         // Saved sp register
@@ -67,6 +67,27 @@ typedef struct {
     enum TaskState  state;      // Current task state
     uint32_t        address;    // Address for swap fifo
 } stack_frame_t;
+#elif defined(KINETISL)
+typedef struct {
+    // Saved Registers
+    uint32_t        r4;
+    uint32_t        r5;
+    uint32_t        r6;
+    uint32_t        r7;
+    uint32_t        r8;
+    uint32_t        r9;
+    uint32_t        sl;
+    uint32_t        fp;
+    uint32_t        sp;         // Saved sp register
+    void            *lr;        // Return address (pc)
+    task_func_t     func_ptr;   // Task function
+    void            *arg;		// Startup arg value
+    uint32_t        stack_size;	// Stack size for this main/coroutine
+    uint32_t        initial_sp;	// Initial stack pointer (for restart)
+    enum TaskState  state;      // Current task state
+    uint32_t        address;    // Address for swap fifo
+} stack_frame_t;
+#endif
 
 // end of bss section
 extern unsigned long _ebss;
@@ -76,16 +97,14 @@ extern unsigned long _estack;
 static volatile uint32_t stackroot = 0;
 // Alternate fill pattern, NOT USED!!!
 static uint32_t psp_fill_pattern = 0;
-// Hold task struct for context switch
-static volatile stack_frame_t process_tasks[MAX_TASKS];
-// Number of tasks
-static volatile uint8_t  num_task     = 0;
 // Mask for task swap
 static volatile uint32_t task_mask    = 0;
 // Restore task_mask when fifo is empty
 static volatile uint32_t mask_num     = 0;
 // Used for low level ISR that gets called for handler functions.
 static volatile boolean update_in_progress  = false;
+// Hold task struct for context switch
+static volatile stack_frame_t process_tasks[MAX_TASKS];
 // Enum for clarity on what function was called and then passed to LOW Level ISR
 // for completion.
 typedef enum  {
@@ -100,6 +119,8 @@ calling_func_t CALLING_FUNCTION;
 task_func_t FUNCTION;
 enum TaskState _STATE;
 uint32_t STACK_MEMORY;
+
+volatile uint8_t num_task = 0;
 //////////////////////////////////////////////////////////////////////
 // Initialize main stack
 //////////////////////////////////////////////////////////////////////
@@ -131,7 +152,7 @@ void init_stack( uint32_t main_stack, uint32_t pattern_override ) {
     p->address = 1;
     p->state = TaskCreated;
     task_mask = ( 1 << 0 );
-    num_task++;
+    //num_task++;
 }
 //////////////////////////////////////////////////////////////////////
 // Fill stack with pattern for task size estimations.
@@ -174,36 +195,89 @@ void startup_late_hook(void) {
 //////////////////////////////////////////////////////////////////////
 static void task_start( ) {
     stack_frame_t* p;
+#if defined(KINETISK)
     asm volatile( "mov %[result], r12\n" : [result] "=r" ( p ) );		 // r12 points to task initially
+#elif defined(KINETISL)
+        asm volatile("mov %[result], r7\n" : [result] "=r" ( p ) );     // r7 points to task initially
+#endif
     asm volatile( "mov r0, %[value]\n" : : [value] "r" ( p->arg ) );	 // Supply void *arg to task call
     asm volatile( "mov r1, %[value]\n" : : [value] "r" ( p->func_ptr ) );// r1 now holds the function ptr to call
+    
+#if defined(KINETISK)
     asm volatile( "push {r2-r12}" ); // push to stack
     asm volatile( "blx  r1\n" );     // func(arg) call
     asm volatile( "pop  {r2-r12}" ); // pop from stack if task is returned
+#elif defined(KINETISL)
+    asm volatile("push {r4-r7}\n");  // push r4-r7 to stack
+    //asm volatile("push {r3}\n");     // push r3 to stack
+    //asm volatile("mov r4,r8\n");     // mov r8 to r4
+    //asm volatile("mov r5,r9\n");     // mov r9 to r5
+    //asm volatile("push {r4,r5}\n");	 // Push r8,r9
+    
+    asm volatile("blx  r1\n");       // func(arg) call
+    
+    asm volatile("pop {r4,r5}\n");   // pop r,8,r9
+    //asm volatile("mov r8,r4\n");     // r4 to r8
+    //asm volatile("mov r9,r5\n");     // r5 to r9
+    //asm volatile("pop {r3}\n");      // pop r3 from stack
+    //asm volatile("pop  {r4-r7}\n");  // pop r4-r7 from stack
+#endif
     p->state = TaskReturned;		 // update state when task has returned
+    
     for (;;) yield( );               // returned task now loop here till restarted
 }
 //////////////////////////////////////////////////////////////////////
 // Set up a task to execute (but don't launch it)
 //////////////////////////////////////////////////////////////////////
-void task_create( task_func_t func, size_t stack_size, volatile void *arg ) {
-    if (num_task >= MAX_TASKS) return;
+enum TaskState task_create( task_func_t func, size_t stack_size, void *arg ) {
     volatile stack_frame_t *p = &process_tasks[num_task]; // Task struct
+#if defined(KINETISK)
     asm volatile( "STMEA %0,{r1-r11}\n" : "+r" ( p ) :: "memory" );// Save r1-r11 to task struct
+#elif defined(KINETISL)
+    task_func_t scratch_r0;
+    size_t scratch_r1;
+    void * scratch_r2;
+    asm volatile( "mov %0,r0\n" : "=r" ( scratch_r0 ) );
+    asm volatile( "mov %0,r1\n" : "=r" ( scratch_r1 ) );
+    asm volatile( "mov %0,r2\n" : "=r" ( scratch_r2 ) );
+    asm volatile( "mov r0,%0\n" : "+r" ( p ) : : "memory" );
+    asm volatile( "mov r1,%0\n" : : "r" ( scratch_r0 ) );
+    asm volatile( "mov r2,%0\n" : : "r" ( scratch_r1 ) );
+    asm volatile( "mov r3,%0\n" : : "r" ( scratch_r2 ) );
+    asm volatile("push {r0,r1,r2,r3}\n");
+    asm volatile("stmia r0!,{r4,r5,r6,r7}\n");  // Save lower regs
+    asm volatile("mov r1,r8\n");                // mov r8 to r1
+    asm volatile("mov r2,r9\n");                // mov r9 to r2
+    asm volatile("mov r3,sl\n");                // mov sl to r3
+    asm volatile("stmia r0!,{r1,r2,r3}\n");	    // Save r8,r9 & sl
+    asm volatile("mov r1,fp\n");                // mov fp to r1
+    asm volatile("mov r2,lr\n");                // mov lr to r2
+    asm volatile("stmia r0!,{r1,r2}\n");    	// Save fp,(placeholder for sp) & lr
+    asm volatile("pop {r0,r1,r2,r3}\n");		// Restore regs
+#endif
+
+#if defined(KINETISK)
     p->stack_size = stack_size;     // Save task size
     p->func_ptr = func;             // Save task function
     p->arg = arg;                   // Save task arg
     p->r12 = ( uint32_t )p;         // r12 points to struct
+#elif defined(KINETISL)
+    p->func_ptr = scratch_r0;       // Save task function
+    p->stack_size = scratch_r1;     // Save task size
+    p->arg = scratch_r2;            // Save task arg
+    p->r7 = ( uint32_t )p;          // r7 points to struct
+#endif
+    
     p->sp = stackroot;              // Save as tasks's sp
     p->state = TaskCreated;		    // Set state of this task
     p->initial_sp = stackroot;		// Save sp for restart()
     p->lr = ( void * ) task_start;	// Task startup code
     stackroot -= stack_size;		// This is the new root of the stack
-    int address = pow(2, num_task);
+    int address = 1 << num_task;//pow(2, num_task);
     p->address |= address;
-    task_mask |= ( (task_mask) << 1 );
+    task_mask = task_mask | ( 1 << num_task );
     mask_num = task_mask;
-    num_task++;
+    return TaskCreated;
 }
 //////////////////////////////////////////////////////////////////////
 // Task locking routines, inspired by PJRC.com SPI transactions.
@@ -277,13 +351,12 @@ extern inline uint32_t sys_release_lock( volatile unsigned int *lock ) {
 //////////////////////////////////////////////////////////////////////
 // Swap one task for another. This should be optimized as much as possible
 //////////////////////////////////////////////////////////////////////
-//static void task_swap( volatile stack_frame_t *prevframe, volatile stack_frame_t *nextframe )__attribute__((naked));
-void task_swap( volatile stack_frame_t *prevframe, volatile stack_frame_t *nextframe ) {
+void task_swap( volatile stack_frame_t *prevframe, volatile stack_frame_t *nextframe  ) {
+#if defined(KINETISK)
     asm volatile (
                   "MRS %[result], MSP\n"
                   : [result] "=r" ( prevframe->sp )
                  );
-
     asm volatile (
                   "ADD r0, #4"             "\n\t"   // &prevframe->r2
                   "STMEA r0!,{r2-r12,lr}"  "\n\t"   // Save r2-r12 + lr
@@ -291,22 +364,45 @@ void task_swap( volatile stack_frame_t *prevframe, volatile stack_frame_t *nextf
                   "MSR MSP, r1"            "\n\t"   // Set new sp
                   "BX lr"                  "\n"
                  );
+#elif defined(KINETISL)
+    asm volatile("stmia r0!,{r4-r7}\n");	// Save r4,r5,r6,r7
+    asm volatile("mov r2,r8\n");            // mov r8 to r2
+    asm volatile("mov r3,r9\n");            // mov r9 to r3
+    asm volatile("mov r4,sl\n");            // mov sl to r4
+    asm volatile("stmia r0!,{r2-r4}\n");	// Save r8,r9,sl
+    asm volatile("mov r2,fp\n");            // mov fp to r2
+    asm volatile("mov r3,sp\n");            // mov sp to r3
+    asm volatile("mov r4,lr\n");            // mov lr to r4
+    asm volatile("stmia r0!,{r2-r4}\n");	// Save fp,sp,lr
+    
+    asm volatile("add r1,#16");             // r0 = &nextfibe->r8
+    asm volatile("ldmia r1!,{r2-r4}\n");	// Load values for r8,r9,sl
+    asm volatile("mov r8,r2\n");            // mov r2 to r8
+    asm volatile("mov r9,r3\n");            // mov r3 to r9
+    asm volatile("mov sl,r4\n");            // mov r4 to sl
+    asm volatile("ldmia r1!,{r2-r4}\n");	// Load values for fp,sp,lr
+    asm volatile("mov fp,r2\n");            // mov fp to r2
+    asm volatile("mov sp,r3\n");            // mov sp to r3
+    asm volatile("mov lr,r4\n");            // mov lr to r4
+    asm volatile("sub r1,#40\n");           // r0 = nextfibe
+    asm volatile("ldmia r1!,{r4-r7}\n");	// Restore r4-r7
+#endif
 }
 //////////////////////////////////////////////////////////////////////
 // all invocations of yield in teensyduino api go through this now.
 //////////////////////////////////////////////////////////////////////
 void yield( void ) {
-    //digitalWriteFast(LED_BUILTIN, HIGH);
+    digitalWriteFast(16, HIGH);
     // There is only the main context running
-    if ( num_task <= 1 )return;
+    if ( num_task == 0 ) return;
 #ifdef USE_INTERRUPTS
     __disable_irq( );
 #endif
     uint32_t mask = task_mask;
-    uint32_t tail = __builtin_ctz(mask);
-    mask &= (mask-1);
-    uint32_t head = __builtin_ctz(mask);
-    if(head >= num_task) head = 0;
+    uint32_t tail = __builtin_ctz( mask );
+    mask &= ( mask - 1 );
+    uint32_t head = __builtin_ctz( mask );
+    if(head > num_task) head = 0;
     // previous task to be stored
     volatile stack_frame_t *last = &process_tasks[tail];
     // next task to be loaded
@@ -314,10 +410,10 @@ void yield( void ) {
     enum TaskState  lst = last->state;
     enum TaskState  nxt = next->state;
     // set previous state to created or returned
-    int l = ( lst != TaskReturned ) ? TaskCreated : TaskReturned;
+    enum TaskState l = ( lst != TaskReturned ) ? TaskCreated : TaskReturned;
     last->state = ( lst == TaskPause ) ? TaskPause : l;
     // set current state to executing or returned
-    int n = ( nxt != TaskReturned ) ? TaskExecuting : TaskReturned;
+    enum TaskState n = ( nxt != TaskReturned ) ? TaskExecuting : TaskReturned;
     next->state = ( nxt == TaskPause ) ? TaskPause : n;
     // update next task
     const uint32_t num = mask_num;
@@ -327,7 +423,7 @@ void yield( void ) {
 #ifdef USE_INTERRUPTS
     __enable_irq( );
 #endif
-    //digitalWriteFast(LED_BUILTIN, LOW);
+    digitalWriteFast(16, LOW);
 }
 //////////////////////////////////////////////////////////////////////
 // pass task state, pass loop state
@@ -424,13 +520,14 @@ void software_isr(void) {
     do {
         p = &process_tasks[i];
         f_ptr = p->func_ptr;
-        if ( i >= num_task ) {
+        if ( i > num_task ) {
             _STATE = TaskInvalid;
             update_in_progress = false;
             return;
         }
         i++;
     } while ( FUNCTION != f_ptr  );
+    
     /* call function handlers */
     switch ( CALLING_FUNCTION ) {
         case PAUSE:
@@ -467,12 +564,16 @@ void software_isr(void) {
             p = &process_tasks[i-1];
             state = p->state;
             if ( state != TaskReturned ) {
-                _STATE = TaskInvalid;;
+                _STATE = TaskInvalid;
                 update_in_progress = false;
                 break;
             }
             p->state = TaskCreated;
+#if defined(KINETISK)
             p->r12 = ( uint32_t )p;
+#elif defined(KINETISL)
+            p->r7 = ( uint32_t )p;
+#endif
             p->func_ptr = FUNCTION;
             p->lr = ( void * )task_start;
             p->sp = p->initial_sp;

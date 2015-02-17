@@ -1,7 +1,7 @@
 /*
  ||
  || @file 		zilch.cpp
- || @version 	0.2
+ || @version 	0.3
  || @author 	Colin Duffy
  || @contact 	cmduffy@engr.psu.edu
  || @author 	Warren Gay
@@ -31,13 +31,13 @@
  */
 
 #include "zilch.h"
-#include "Arduino.h"
+//#include "Arduino.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
     void       init_stack   ( uint32_t main_stack, uint32_t pattern_override );
-    void       task_create  ( task_func_t func, uint32_t stack_size, volatile void *arg );
+    TaskState  task_create  ( task_func_t func, uint32_t stack_size, void *arg );
     TaskState  task_state   ( task_func_t func );
     TaskState  main_state   ( loop_func_t func );
     TaskState  task_sync    ( task_func_t func );
@@ -56,10 +56,12 @@ Zilch::Zilch( uint16_t main_stack_size, const uint32_t pattern ) {
     init_stack( main_stack_size, pattern );
 }
 
-TaskState Zilch::create( task_func_t task, size_t stack_size, volatile void *arg ) {
+TaskState Zilch::create( task_func_t task, size_t stack_size, void *arg ) {
     // Round stack size to a word multiple
     int s_size = ( stack_size + sizeof (uint32_t) ) / sizeof (uint32_t) * sizeof (uint32_t);
-    task_create( task, s_size, arg );
+    if (++num_task >= MAX_TASKS) return TaskInvalid;
+    TaskState p = task_create( task, s_size, arg );
+    return p;
 }
 
 TaskState Zilch::state( task_func_t task ) {

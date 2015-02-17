@@ -1,7 +1,7 @@
 /*
  ||
  || @file 		task.h
- || @version 	0.2
+ || @version 	0.3
  || @author 	Colin Duffy
  || @contact 	cmduffy@engr.psu.edu
  || @author 	Warren Gay
@@ -31,7 +31,7 @@
 
 #include "Arduino.h"
 
-#define MAX_TASKS 32
+#define MAX_TASKS 8
 
 #ifdef __cplusplus
 extern "C" {
@@ -49,6 +49,7 @@ for ( TYPE, __ToDo = sys_acquire_lock( &lock );  __ToDo;  __ToDo = sys_release_l
 typedef void ( * task_func_t )( void *arg );
 typedef void ( * loop_func_t )( void );
 
+
 enum TaskState {
     TaskCreated,	// task created, but not yet started
     TaskPause,	    // task is paused
@@ -56,4 +57,7 @@ enum TaskState {
     TaskReturned,	// task has terminated
     TaskInvalid		// task is invalid 
 };
+
+// Number of tasks
+extern volatile uint8_t  num_task;
 #endif
