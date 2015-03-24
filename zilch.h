@@ -40,6 +40,13 @@
 
 #include "utility/task.h"
 
+/**************************************************
+ * This allows yield calls in a ISR not to lockup,
+ * the kernel. Uncomment if any ISR calls yield in
+ * its handler code.
+ **************************************************/
+//#define USE_INTERRUPTS
+
 class Zilch {
 private:
 public:

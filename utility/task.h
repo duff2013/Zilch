@@ -31,21 +31,6 @@
 
 #include "Arduino.h"
 
-#define MAX_TASKS 8
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-    inline uint32_t sys_acquire_lock( volatile unsigned int *lock_var );
-    inline uint32_t sys_release_lock( volatile unsigned int *lock_var );
-    void TaskUseInterrupt(enum IRQ_NUMBER_t interruptName);
-#ifdef __cplusplus
-}
-#endif
-#define TYPE uint32_t scratch = 0
-#define TASK_LOCK( lock ) \
-for ( TYPE, __ToDo = sys_acquire_lock( &lock );  __ToDo;  __ToDo = sys_release_lock( &lock ) )
-
 typedef void ( * task_func_t )( void *arg );
 typedef void ( * loop_func_t )( void );
 
@@ -58,6 +43,48 @@ enum TaskState {
     TaskInvalid		// task is invalid 
 };
 
-// Number of tasks
-extern volatile uint8_t  num_task;
+#if defined(KINETISK)
+typedef struct {
+    // Saved Registers
+    uint32_t        sp;         // Saved sp register
+    uint32_t        r2;         // after the function has begun
+    uint32_t        r3;         // Saved r3 etc.
+    uint32_t        r4;
+    uint32_t        r5;
+    uint32_t        r6;
+    uint32_t        r7;
+    uint32_t        r8;
+    uint32_t        r9;
+    uint32_t        r10;
+    uint32_t        r11;
+    uint32_t        r12;
+    void            *lr;        // Return address (pc)
+    void            *arg;		// Startup arg value
+    uint32_t        stack_size;	// Stack size for this main/coroutine
+    uint32_t        initial_sp;	// Initial stack pointer (for restart)
+    task_func_t     func_ptr;   // Task function
+    enum TaskState  state;      // Current task state
+    uint32_t        address;    // Address for swap fifo
+} stack_frame_t;
+#elif defined(KINETISL)
+typedef struct {
+    // Saved Registers
+    uint32_t        r4;
+    uint32_t        r5;
+    uint32_t        r6;
+    uint32_t        r7;
+    uint32_t        r8;
+    uint32_t        r9;
+    uint32_t        sl;
+    uint32_t        fp;
+    uint32_t        sp;         // Saved sp register
+    void            *lr;        // Return address (pc)
+    task_func_t     func_ptr;   // Task function
+    void            *arg;		// Startup arg value
+    uint32_t        stack_size;	// Stack size for this main/coroutine
+    uint32_t        initial_sp;	// Initial stack pointer (for restart)
+    enum TaskState  state;      // Current task state
+    uint32_t        address;    // Address for swap fifo
+} stack_frame_t;
+#endif
 #endif
