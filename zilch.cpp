@@ -1,7 +1,7 @@
 /*
  ||
  || @file 		zilch.cpp
- || @version 	0.3
+ || @version 	0.4
  || @author 	Colin Duffy
  || @contact 	cmduffy@engr.psu.edu
  || @author 	Warren Gay
