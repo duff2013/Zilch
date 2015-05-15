@@ -68,16 +68,12 @@ extern "C" {
     TaskState  task_resume  ( task_func_t func );
     uint32_t   task_memory  ( task_func_t func );
     uint32_t   main_memory  ( loop_func_t func );
-    inline uint32_t sys_acquire_lock( volatile unsigned int *lock_var );
-    inline uint32_t sys_release_lock( volatile unsigned int *lock_var );
-    void TaskUseInterrupt(enum IRQ_NUMBER_t interruptName);
+    //inline uint32_t sys_acquire_lock( volatile unsigned int *lock_var );
+    //inline uint32_t sys_release_lock( volatile unsigned int *lock_var );
+    //void TaskUseInterrupt(enum IRQ_NUMBER_t interruptName);
 #ifdef __cplusplus
 }
 #endif
-
-#define TYPE uint32_t scratch = 0
-#define TASK_LOCK( lock ) \
-for ( TYPE, __ToDo = sys_acquire_lock( &lock );  __ToDo;  __ToDo = sys_release_lock( &lock ) )
 
 // end of bss section
 extern unsigned long _ebss;

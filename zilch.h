@@ -45,7 +45,7 @@
  * the kernel. Uncomment if any ISR calls yield in
  * its handler code.
  **************************************************/
-//#define USE_INTERRUPTS
+#define USE_INTERRUPTS
 
 class Zilch {
 private:
