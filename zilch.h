@@ -1,7 +1,7 @@
 /*
  ||
  || @file 		zilch.cpp
- || @version 	0.3
+ || @version 	0.5
  || @author 	Colin Duffy
  || @contact 	cmduffy@engr.psu.edu
  || @author 	Warren Gay
@@ -45,21 +45,23 @@
  * the kernel. Uncomment if any ISR calls yield in
  * its handler code.
  **************************************************/
-#define USE_INTERRUPTS
+//#define USE_INTERRUPTS
 
 class Zilch {
 private:
 public:
-    Zilch            ( uint16_t main_stack_size, const uint32_t pattern = 0xA5A5A5A5 ) ;
-    TaskState create ( task_func_t task, size_t stack_size, void *arg ) ;
-    TaskState pause  ( task_func_t task ) ;
-    TaskState resume ( task_func_t task ) ;
-    TaskState restart( task_func_t task ) ;
-    TaskState sync   ( task_func_t task ) ;
-    TaskState state  ( task_func_t task ) ;
-    TaskState state  ( loop_func_t task ) ;
-    uint32_t  memory ( task_func_t task ) ;
-    uint32_t  memory ( loop_func_t task ) ;
+    Zilch              ( uint16_t main_stack_size, const uint32_t pattern = 0xA5A5A5A5 ) ;
+    TaskState create   ( task_func_t task, size_t stack_size, void *arg ) ;
+    TaskState pause    ( task_func_t task ) ;
+    TaskState resume   ( task_func_t task ) ;
+    TaskState restart  ( task_func_t task ) ;
+    TaskState sync     ( task_func_t task ) ;
+    TaskState state    ( task_func_t task ) ;
+    TaskState state    ( loop_func_t task ) ;
+    uint32_t  memory   ( task_func_t task ) ;
+    uint32_t  memory   ( loop_func_t task ) ;
+    bool      transmit ( void *p, task_func_t task_to, task_func_t task_from, int count ) ;
+    bool      receive  ( task_func_t task_to, task_func_t task_from, void *p ) ;
 };
 #endif
 #endif

@@ -1,7 +1,7 @@
 /*
  ||
  || @file 		task.h
- || @version 	0.4
+ || @version 	0.5
  || @author 	Colin Duffy
  || @contact 	cmduffy@engr.psu.edu
  || @author 	Warren Gay
@@ -31,6 +31,13 @@
 
 #include "Arduino.h"
 
+/**************************************************
+ * This allows yield calls in a ISR not to lockup,
+ * the kernel. Uncomment if any ISR calls yield in
+ * its handler code.
+ **************************************************/
+//#define USE_INTERRUPTS
+
 typedef void ( * task_func_t )( void *arg );
 typedef void ( * loop_func_t )( void );
 
@@ -39,32 +46,36 @@ extern "C" {
 #endif
     inline uint32_t sys_acquire_lock( volatile unsigned int *lock_var );
     inline uint32_t sys_release_lock( volatile unsigned int *lock_var );
-    inline void TaskUseInterrupt(enum IRQ_NUMBER_t interruptName);
+    //inline void TaskUseInterrupt(enum IRQ_NUMBER_t interruptName);
 #ifdef __cplusplus
 }
 #endif
 
-#define TYPE uint32_t scratch = 0
+#define TYPE uint32_t
 #define TASK_LOCK( lock ) \
-for ( TYPE, __ToDo = sys_acquire_lock( &lock );  __ToDo;  __ToDo = sys_release_lock( &lock ) )
+for ( TYPE __ToDo = sys_acquire_lock( &lock );  __ToDo;  __ToDo = sys_release_lock( &lock ) )
 //////////////////////////////////////////////////////////////////////
 // Task locking routines, inspired by PJRC.com SPI transactions.
 //////////////////////////////////////////////////////////////////////
-static uint8_t  interruptMasksUsed;
-static uint32_t interruptSave[(NVIC_NUM_INTERRUPTS+31)/32];
-static uint32_t interruptMask[(NVIC_NUM_INTERRUPTS+31)/32];
+//static uint8_t  interruptMasksUsed;
+//static uint32_t interruptSave[(NVIC_NUM_INTERRUPTS+31)/32];
+//static uint32_t interruptMask[(NVIC_NUM_INTERRUPTS+31)/32];
 //-----------------------------------------------------------------------
 extern inline void TaskUseInterrupt( enum IRQ_NUMBER_t interruptName ) {
-    uint32_t n = ( uint32_t )interruptName;
-    if (n >= NVIC_NUM_INTERRUPTS) return;
-    interruptMasksUsed |= (1 << (n >> 5));
-    interruptMask[n >> 5] |= (1 << (n & 0x1F));
+    //uint32_t n = ( uint32_t )interruptName;
+    //if (n >= NVIC_NUM_INTERRUPTS) return;
+    //interruptMasksUsed |= (1 << (n >> 5));
+    //interruptMask[n >> 5] |= (1 << (n & 0x1F));
 }
 //-----------------------------------------------------------------------
 extern inline uint32_t sys_acquire_lock( volatile unsigned int *lock ) {
-    do { yield( ); }
-    while ( !__sync_bool_compare_and_swap( lock, 0, 1 ) );
-    if ( interruptMasksUsed ) {
+
+/*#if defined(USE_INTERRUPTS)
+    
+    int priority = nvic_execution_priority( );// get current priority
+    
+    if ( interruptMasksUsed && priority > 256 ) {
+        __disable_irq();
         if ( interruptMasksUsed & 0x01 ) {
             interruptSave[0] = NVIC_ICER0 & interruptMask[0];
             NVIC_ICER0 = interruptSave[0];
@@ -87,14 +98,31 @@ extern inline uint32_t sys_acquire_lock( volatile unsigned int *lock ) {
             NVIC_ICER3 = interruptSave[3];
         }
 #endif
+        __enable_irq();
     }
+#endif*/
+    
+    do {
+        //__enable_irq();
+        yield( );
+        //__disable_irq();
+    }
+    while ( !__sync_bool_compare_and_swap( lock, 0, 1 ) );
+    //__enable_irq();
     return *lock;
 }
 //-----------------------------------------------------------------------
 extern inline uint32_t sys_release_lock( volatile unsigned int *lock ) {
+    //__disable_irq();
     asm volatile ( "" ::: "memory" );
     *lock = 0;
-    if ( interruptMasksUsed ) {
+    //yield( );
+    //__enable_irq();
+    return *lock;
+/*#if defined(USE_INTERRUPTS)
+    int priority = nvic_execution_priority( );// get current priority
+    if ( interruptMasksUsed && priority > 256 ) {
+        __disable_irq();
         if ( interruptMasksUsed & 0x01 ) {
             NVIC_ISER0 = interruptSave[0];
         }
@@ -113,10 +141,25 @@ extern inline uint32_t sys_release_lock( volatile unsigned int *lock ) {
             NVIC_ISER3 = interruptSave[3];
         }
 #endif
+        __enable_irq();
     }
-    return *lock;
+#endif*/
 }
-//-----------------------------------------------------------------------
+//////////////////////////////////////////////////////////////////////
+// Task inter messaging
+//////////////////////////////////////////////////////////////////////
+typedef struct {
+    union {
+        float type_f;
+        uint32_t type_u32;
+        byte type_b[4];
+    };
+    volatile task_func_t func_to_ptr;
+    volatile task_func_t func_from_ptr;
+} task_msg_t;
+//////////////////////////////////////////////////////////////////////
+// Task Struct - save register
+//////////////////////////////////////////////////////////////////////
 enum TaskState {
     TaskCreated,	// task created, but not yet started
     TaskPause,	    // task is paused

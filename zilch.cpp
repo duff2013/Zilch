@@ -1,7 +1,7 @@
 /*
  ||
  || @file 		zilch.cpp
- || @version 	0.4
+ || @version 	0.5
  || @author 	Colin Duffy
  || @contact 	cmduffy@engr.psu.edu
  || @author 	Warren Gay
@@ -44,6 +44,8 @@
 #define MIN_MAIN_STACK_SIZE 200
 // Memory fill pattern used to estimate stack usage.
 #define MEMORY_FILL_PATTERN 0XFFFFFFFFUL
+// Size of the inter task message buffer
+#define MSG_BUFFER_SIZE 20
 /****************************************************
 *----------------End Editable Options---------------*
 *****************************************************/
@@ -107,11 +109,18 @@ task_func_t FUNCTION;
 loop_func_t LOOP_FUNCTION;
 TaskState _STATE;
 uint32_t STACK_MEMORY;
+task_msg_t msg[MSG_BUFFER_SIZE];
+uint32_t msgHead;
+uint32_t msgTail;
 
 Zilch::Zilch( uint16_t main_stack_size, const uint32_t pattern ) {
-    NVIC_SET_PRIORITY( IRQ_SOFTWARE, 0xFF ); // 0xFF = lowest priority
-    NVIC_ENABLE_IRQ( IRQ_SOFTWARE );
+    NVIC_SET_PRIORITY( IRQ_RTC_SECOND, 0xFF ); // 0xFF = lowest priority
+    NVIC_ENABLE_IRQ( IRQ_RTC_SECOND );
     init_stack( main_stack_size, pattern );
+    for (int i = 0; i <= MSG_BUFFER_SIZE; i++) {
+        msg[i].func_to_ptr = nullptr;
+        msg[i].func_from_ptr = nullptr;
+    }
 }
 
 TaskState Zilch::create( task_func_t task, size_t stack_size, void *arg ) {
@@ -164,6 +173,32 @@ uint32_t Zilch::memory( task_func_t task ) {
 uint32_t Zilch::memory( loop_func_t task ) {
     uint32_t tmp = 0;// = main_size(task);
     return tmp;
+}
+
+bool Zilch::transmit( void *p, task_func_t task_to, task_func_t task_from, int count ) {
+    for (int i = 0; i < MSG_BUFFER_SIZE; i++) {
+        if (msg[i].func_to_ptr == nullptr && msg[i].func_from_ptr == nullptr) {
+            msg[i].func_to_ptr = task_to;
+            msg[i].func_from_ptr = task_from;
+            byte *tmp = ( byte * )p;
+            memcpy( msg[i].type_b, tmp, count );
+            return false;
+        }
+    }
+    return true;
+}
+
+bool Zilch::receive( task_func_t task_to, task_func_t task_from, void *p ) {
+    for (int i = 0; i < MSG_BUFFER_SIZE; i++) {
+        if (msg[i].func_to_ptr == task_to && msg[i].func_from_ptr == task_from) {
+            byte *tmp = ( byte * )p;
+            memcpy( tmp, msg[i].type_b, 4 );
+            msg[i].func_to_ptr = nullptr;
+            msg[i].func_from_ptr = nullptr;
+            return false;
+        }
+    }
+    return true;
 }
 /******************************************************************************************
   ________          ________          ________          ________          ________
@@ -370,14 +405,14 @@ void yield( void ) {
 TaskState task_state( task_func_t func ) {
     FUNCTION = func;
     CALLING_FUNCTION = TASK_STATE;
-    NVIC_SET_PENDING( IRQ_SOFTWARE );
+    NVIC_SET_PENDING( IRQ_RTC_SECOND );
     while( update_in_progress ) ;
     return _STATE;
 }
 TaskState main_state( loop_func_t func ) {
     LOOP_FUNCTION = func;
     CALLING_FUNCTION = MAIN_STATE;
-    NVIC_SET_PENDING( IRQ_SOFTWARE );
+    NVIC_SET_PENDING( IRQ_RTC_SECOND );
     while( update_in_progress ) ;
     return _STATE;
 }
@@ -402,7 +437,7 @@ TaskState task_restart( task_func_t func ) {
     FUNCTION = func;
     CALLING_FUNCTION = RESTART;
     update_in_progress = true;
-    NVIC_SET_PENDING( IRQ_SOFTWARE );
+    NVIC_SET_PENDING( IRQ_RTC_SECOND );
     while( update_in_progress ) ;
     return _STATE;
 }
@@ -414,7 +449,7 @@ TaskState task_pause( task_func_t func ) {
     FUNCTION = func;
     CALLING_FUNCTION = PAUSE;
     update_in_progress = true;
-    NVIC_SET_PENDING( IRQ_SOFTWARE );
+    NVIC_SET_PENDING( IRQ_RTC_SECOND );
     while( update_in_progress ) ;
     return _STATE;
 }
@@ -426,7 +461,7 @@ TaskState task_resume( task_func_t func ) {
     FUNCTION = func;
     CALLING_FUNCTION = RESUME;
     update_in_progress = true;
-    NVIC_SET_PENDING( IRQ_SOFTWARE );
+    NVIC_SET_PENDING( IRQ_RTC_SECOND );
     while( update_in_progress ) ;
     return _STATE;
 }
@@ -437,7 +472,7 @@ uint32_t task_memory( task_func_t func ) {
     FUNCTION = func;
     CALLING_FUNCTION = MEMORY;
     update_in_progress = true;
-    NVIC_SET_PENDING( IRQ_SOFTWARE );
+    NVIC_SET_PENDING( IRQ_RTC_SECOND );
     while( update_in_progress ) ;
     return STACK_MEMORY;
 }
@@ -449,7 +484,7 @@ uint32_t main_memory( loop_func_t func ) {
 //////////////////////////////////////////////////////////////////////
 // low priority isr to update or change the state of each task
 //////////////////////////////////////////////////////////////////////
-void software_isr(void) {
+void rtc_seconds_isr(void) {
     task_func_t f_ptr;
     TaskState state;
     uint32_t num;
