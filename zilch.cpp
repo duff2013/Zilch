@@ -367,7 +367,7 @@ void task_swap( volatile stack_frame_t *prevframe, volatile stack_frame_t *nextf
 void yield( void ) {
     //digitalWriteFast(16, HIGH);
     // There is only the main context running
-    if ( num_task == 0 ) return;
+    if ( num_task <= 0 ) return;
 #ifdef USE_INTERRUPTS
     __disable_irq( );
 #endif
