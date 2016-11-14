@@ -126,7 +126,8 @@ Zilch::Zilch( uint16_t main_stack_size, const uint32_t pattern ) {
 TaskState Zilch::create( task_func_t task, size_t stack_size, void *arg ) {
     // Round stack size to a word multiple
     int s_size = ( stack_size + sizeof ( uint32_t ) ) / sizeof ( uint32_t ) * sizeof ( uint32_t );
-    if ( ++num_task >= MAX_TASKS ) return TaskInvalid;
+    if ( num_task+1 >= MAX_TASKS ) return TaskInvalid;
+    ++num_task;
 #if defined(KINETISK)
     TaskState p = task_create( task, s_size, arg );
 #elif defined(KINETISL)
@@ -333,7 +334,7 @@ void task_swap( volatile stack_frame_t *prevframe, volatile stack_frame_t *nextf
     asm volatile (
                   "ADD r0, #4"             "\n\t"   // &prevframe->r2
                   "STMEA r0!,{r2-r12,lr}"  "\n\t"   // Save r2-r12 + lr
-                  "LDMFD r1,{r1-r12,lr}"   "\n\t"   // Restore r1(sp) and r2-r12, lr
+                  "LDMIA r1,{r1-r12,lr}"   "\n\t"   // Restore r1(sp) and r2-r12, lr
                   "MSR MSP, r1"            "\n\t"   // Set new sp
                   "BX lr"                  "\n"
                   );
@@ -418,7 +419,6 @@ TaskState main_state( loop_func_t func ) {
 }
 //////////////////////////////////////////////////////////////////////
 // routine to block until selected task return's.
-// ** calls low priority software isr to update **
 //////////////////////////////////////////////////////////////////////
 TaskState task_sync( task_func_t func ) {
     enum TaskState return_state;
@@ -426,7 +426,7 @@ TaskState task_sync( task_func_t func ) {
         yield( );
         return_state = task_state( func );
     }
-    while ( ( return_state == TaskReturned ) || ( return_state == TaskPause )  ) ; // Keep waiting
+    while ( ( return_state == TaskCreated ) || ( return_state == TaskPause )  ) ; // Keep waiting
     return return_state;
 }
 //////////////////////////////////////////////////////////////////////

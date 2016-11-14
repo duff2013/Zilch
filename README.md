@@ -1,4 +1,4 @@
-Zlich v0.5
+Zlich v0.6
 ==========
 
 Lean and mean scheduler library for the Teensy 3.x/LC based off the the most excellent [Fibers] library by Warren Gay.
