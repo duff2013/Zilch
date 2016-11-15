@@ -125,15 +125,7 @@ Zilch::Zilch( uint16_t main_stack_size, const uint32_t pattern ) {
 
 TaskState Zilch::create( task_func_t task, size_t stack_size, void *arg ) {
     // Round stack size to a word multiple
-    int s_size = ( stack_size + sizeof ( uint32_t ) - 1 ) / sizeof ( uint32_t ) * sizeof ( uint32_t );
-    
-    Serial.print("Num: ");
-    Serial.print(num_task);
-    Serial.print(" | S Size: ");
-    Serial.print(s_size);
-    Serial.print(" | Stack Size: ");
-    Serial.println(stack_size);
-    
+    int s_size = ( stack_size + sizeof ( uint32_t ) -1 ) / sizeof ( uint32_t ) * sizeof ( uint32_t );
     if ( num_task+1 >= MAX_TASKS ) return TaskInvalid;
     ++num_task;
 #if defined(KINETISK)
