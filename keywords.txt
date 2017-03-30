@@ -8,20 +8,25 @@
 Zilch	KEYWORD1
 zilch	KEYWORD1
 create	KEYWORD1
-current	KEYWORD1
+createDestroyable	KEYWORD1
 yield	KEYWORD1
 state	KEYWORD1
 sync	KEYWORD1
 pause	KEYWORD1
 resume	KEYWORD1
 restart	KEYWORD1
-memory	KEYWORD1
+freeMemory	KEYWORD1
+restartAll	KEYWORD1
 #######################################
 # Methods and Functions (KEYWORD2)
 #######################################
 TaskState		KEYWORD2
+TaskCreated		KEYWORD2
+TaskPaused		KEYWORD2
+TaskReturned	KEYWORD2
+TaskInvalid		KEYWORD2
 TASK_LOCK		KEYWORD2
-TaskUseInterrupt	KEYWORD2
+MPSS		KEYWORD2
 #######################################
 # Instances (KEYWORD2)
 #######################################

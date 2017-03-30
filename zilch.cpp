@@ -1,140 +1,127 @@
-/*
- ||
- || @file 		zilch.cpp
- || @version 	0.5
- || @author 	Colin Duffy
- || @contact 	cmduffy@engr.psu.edu
- || @author 	Warren Gay
- || @contact 	ve3wwg@gmail.com
- ||
- || @description
- || Light weight task scheduler library, based off the awesome fibers
- || library by Warren Gay. https://github.com/ve3wwg/teensy3_fibers
- ||
- || @license
- || | Copyright (c) 2014 Colin Duffy, (C) Warren Gay VE3WWG
- || | This library is free software; you can redistribute it and/or
- || | modify it under the terms of the GNU Lesser General Public
- || | License as published by the Free Software Foundation; version
- || | 2.1 of the License.
- || |
- || | This library is distributed in the hope that it will be useful,
- || | but WITHOUT ANY WARRANTY; without even the implied warranty of
- || | MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- || | Lesser General Public License for more details.
- || |
- || | You should have received a copy of the GNU Lesser General Public
- || | License along with this library; if not, write to the Free Software
- || | Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
- || #
- ||
- */
+/***********************************************************************************
+ * Lightweight Scheduler Library for Teensy LC/3.x
+ * Copyright (c) 2016, Colin Duffy https://github.com/duff2013
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice, development funding notice, and this permission
+ * notice shall be included in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ ***********************************************************************************
+ *  zilch.cpp
+ *  Teensy 3.x/LC
+ ***********************************************************************************/
 
 #include "zilch.h"
 #include "utility/task.h"
-/***************************************************
-*----------------Editible Options------------------*
-****************************************************/
-#if defined(KINETISK)
-    #define MAX_TASKS 32
-#elif defined(KINETISL)
-    #define MAX_TASKS 8
-#endif
-// minimum main stack size.
-#define MIN_MAIN_STACK_SIZE 200
-// Memory fill pattern used to estimate stack usage.
-#define MEMORY_FILL_PATTERN 0XFFFFFFFFUL
-// Size of the inter task message buffer
-#define MSG_BUFFER_SIZE 20
-/****************************************************
-*----------------End Editable Options---------------*
-*****************************************************/
-//TODO: use the PSP stack pointer for tasks returns and MSP for ISR returns.
-#define MAIN_RETURN         0xFFFFFFF9  //Tells the handler to return using the MSP
-#define THREAD_RETURN       0xFFFFFFFD //Tells the handler to return using the PSP
+#include "utility/mem_manger.h"
+
+struct stack_frame_t {
+    uint32_t        *sp;            // Saved sp register
+    uint32_t        r4;
+    uint32_t        r5;
+    uint32_t        r6;
+    uint32_t        r7;
+    uint32_t        r8;
+    uint32_t        r9;
+    uint32_t        r10;
+    uint32_t        r11;
+    uint32_t        *r12;           // Scratch Register holds stack frame
+    uint32_t        *lr;            // Return address (pc)
+    uint32_t        address;        // Address for swap fifo
+    uint32_t        *stack_top;     // Top of the stack(for restart)
+    uint32_t        *stack_bottom;  // Bottom of the stack
+    uint32_t        free_memory;    // Estimated memory usage
+    task_func_t     ptr;            // Task function
+    void            *arg;           // Startup arg value
+    enum TaskState  state;          // Current task state
+    stack_frame_t   *next;          // points to next tasks memory section
+};
+
+typedef struct {
+    uint8_t       num_task;
+    uint32_t      memory_fill_pattern;
+    uint32_t      memory_water_mark;
+    stack_frame_t *current_frame;
+    stack_frame_t *root_frame;
+    boolean       begin;
+    boolean       tasks_to_destroy;
+    mem_manger    mem;
+} os_t;
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-    void init_stack( uint32_t main_stack, uint32_t pattern_override );
-#if defined(KINETISK)
-    TaskState task_create( task_func_t func, size_t stack_size, void *arg );
-#elif defined(KINETISL)
-    TaskState task_create( volatile stack_frame_t *frame, size_t stack_size, task_func_t func, void *arg );
-#endif
-    TaskState  task_state   ( task_func_t func );
-    TaskState  main_state   ( loop_func_t func );
-    TaskState  task_sync    ( task_func_t func );
-    TaskState  task_restart ( task_func_t func );
-    TaskState  task_pause   ( task_func_t func );
-    TaskState  task_resume  ( task_func_t func );
-    uint32_t   task_memory  ( task_func_t func );
-    uint32_t   main_memory  ( loop_func_t func );
-    //inline uint32_t sys_acquire_lock( volatile unsigned int *lock_var );
-    //inline uint32_t sys_release_lock( volatile unsigned int *lock_var );
-    //void TaskUseInterrupt(enum IRQ_NUMBER_t interruptName);
+    void      init_stack  ( uint32_t memory_fill );
+    stack_frame_t * task_create ( task_func_t func, mem_block_t *mem, void *arg );
+    void      start_os                 ( void );
+    void      task_sync                ( void );
+    void      task_restart_all         ( void );
+    TaskState task_state               ( task_func_t func );
+    TaskState task_restart             ( task_func_t func );
+    TaskState task_pause               ( task_func_t func );
+    TaskState task_resume              ( task_func_t func );
+    uint32_t  task_memory              ( task_func_t func );
+    void      destroy_task             ( int index );
+    
+    stack_frame_t *remove_task_from_runlist ( task_func_t func );
+    stack_frame_t *add_task_to_runlist      ( task_func_t func );
+    
 #ifdef __cplusplus
 }
 #endif
 
-// end of bss section
-extern unsigned long _ebss;
-// end of heap/stack area
-extern unsigned long _estack;
-// Address of the stack root for last task (else 0)
-static volatile uint32_t stackroot = 0;
-// Alternate fill pattern, NOT USED!!!
-static uint32_t psp_fill_pattern = 0;
-// Mask for task swap
-static volatile uint32_t task_mask    = 0;
-// Restore task_mask when fifo is empty
-static volatile uint32_t init_mask     = 0;
-// Used for low level ISR that gets called for handler functions.
-static volatile boolean update_in_progress  = false;
-// Hold task struct for context switch
-static volatile stack_frame_t process_tasks[MAX_TASKS];
-volatile uint8_t num_task = 0;
-// Enum for clarity on what function was called and then passed to LOW Level ISR
-// for completion.
-typedef enum  {
-    PAUSE,
-    RESUME,
-    RESTART,
-    TASK_STATE,
-    MAIN_STATE,
-    MEMORY
-} calling_func_t;
-calling_func_t CALLING_FUNCTION;
-task_func_t FUNCTION;
-loop_func_t LOOP_FUNCTION;
-TaskState _STATE;
-uint32_t STACK_MEMORY;
-task_msg_t msg[MSG_BUFFER_SIZE];
-uint32_t msgHead;
-uint32_t msgTail;
+static os_t os __attribute__ ((aligned (4)));
 
-Zilch::Zilch( uint16_t main_stack_size, const uint32_t pattern ) {
-    NVIC_SET_PRIORITY( IRQ_RTC_SECOND, 0xFF ); // 0xFF = lowest priority
-    NVIC_ENABLE_IRQ( IRQ_RTC_SECOND );
-    init_stack( main_stack_size, pattern );
-    for (int i = 0; i <= MSG_BUFFER_SIZE; i++) {
-        msg[i].func_to_ptr = nullptr;
-        msg[i].func_from_ptr = nullptr;
-    }
+static void kernal( void *arg );
+
+Zilch::Zilch( uint32_t override_pattern ) {
+    init_stack( override_pattern );
 }
 
 TaskState Zilch::create( task_func_t task, size_t stack_size, void *arg ) {
-    // Round stack size to a word multiple
-    int s_size = ( stack_size + sizeof ( uint32_t ) -1 ) / sizeof ( uint32_t ) * sizeof ( uint32_t );
-    if ( num_task+1 >= MAX_TASKS ) return TaskInvalid;
-    ++num_task;
-#if defined(KINETISK)
-    TaskState p = task_create( task, s_size, arg );
-#elif defined(KINETISL)
-    volatile stack_frame_t *frame = &process_tasks[num_task];
-    TaskState p = task_create( frame, s_size, task, arg );
-#endif
-    return p;
+    mem_block_t *block;
+    if ( os.root_frame == NULL ) {
+        block = os.mem.alloc( 512, os.memory_fill_pattern );
+        if ( block == NULL ) return TaskInvalid;
+        task_create( kernal, block, 0 );
+        os.num_task = 1;
+    }
+    uint32_t num = os.num_task; // get current number of tasks
+    block = os.mem.alloc( stack_size, os.memory_fill_pattern );
+    if ( block == NULL ) return TaskInvalid;
+    stack_frame_t *p = task_create( task, block, 0 );
+    os.num_task = ++num;// total number of tasks
+    
+    return p->state;
+}
+
+TaskState Zilch::createDestroyable ( task_func_t task, size_t stack_size, void *arg ) {
+    mem_block_t *block;
+    uint32_t num = os.num_task; // get current number of tasks
+    block = os.mem.alloc( stack_size, os.memory_fill_pattern );
+    if ( block == NULL ) return TaskInvalid;
+    stack_frame_t *p = task_create( task, block, 0 );
+    p->state = TaskDestroyable;
+    p->address = 0xFFFFFFFF;
+    os.num_task = ++num;// total number of tasks
+    return p->state;
+}
+
+void Zilch::begin( void ) {
+    start_os( );
 }
 
 TaskState Zilch::state( task_func_t task ) {
@@ -152,14 +139,8 @@ TaskState Zilch::pause( task_func_t task ) {
     return p;
 }
 
-TaskState Zilch::state( loop_func_t task ) {
-    TaskState p = main_state( task );
-    return p;
-}
-
-TaskState Zilch::sync( task_func_t task) {
-    TaskState p = task_sync( task );
-    return p;
+void Zilch::sync( void) {
+    task_sync( );
 }
 
 TaskState Zilch::restart( task_func_t task ) {
@@ -167,421 +148,497 @@ TaskState Zilch::restart( task_func_t task ) {
     return p;
 }
 
-uint32_t Zilch::memory( task_func_t task ) {
+void Zilch::restartAll( void ) {
+    task_restart_all( );
+}
+
+uint32_t Zilch::freeMemory( task_func_t task ) {
     return task_memory( task );
 }
 
-uint32_t Zilch::memory( loop_func_t task ) {
-    uint32_t tmp = 0;// = main_size(task);
-    return tmp;
-}
-
-bool Zilch::transmit( void *p, task_func_t task_to, task_func_t task_from, int count ) {
-    for (int i = 0; i < MSG_BUFFER_SIZE; i++) {
-        if (msg[i].func_to_ptr == nullptr && msg[i].func_from_ptr == nullptr) {
-            msg[i].func_to_ptr = task_to;
-            msg[i].func_from_ptr = task_from;
-            byte *tmp = ( byte * )p;
-            memcpy( msg[i].type_b, tmp, count );
-            return false;
-        }
-    }
-    return true;
-}
-
-bool Zilch::receive( task_func_t task_to, task_func_t task_from, void *p ) {
-    for (int i = 0; i < MSG_BUFFER_SIZE; i++) {
-        if (msg[i].func_to_ptr == task_to && msg[i].func_from_ptr == task_from) {
-            byte *tmp = ( byte * )p;
-            memcpy( tmp, msg[i].type_b, 4 );
-            msg[i].func_to_ptr = nullptr;
-            msg[i].func_from_ptr = nullptr;
-            return false;
-        }
-    }
-    return true;
+void Zilch::setMemoryWaterMark( uint16_t threshold ) {
+    
 }
 /******************************************************************************************
   ________          ________          ________          ________          ________
 _|        |________|        |________|        |________|        |________|        |________
 *******************************************************************************************/
 //////////////////////////////////////////////////////////////////////
+// Tasks startup routine
+//////////////////////////////////////////////////////////////////////
+static void kernal( void *arg ) {
+    while ( 1 ) {
+        
+        if ( os.tasks_to_destroy == true ) {
+            
+            mem_block_t *start = os.mem.allocList( );
+            mem_block_t *end = start + 31;
+            
+            do {
+                if ( start->block != 0 ) {
+                    stack_frame_t *pmem = ( stack_frame_t * )start->block;
+                    if ( pmem->ptr == NULL ) {
+                        os.num_task--;
+                        os.mem.free( start->block );
+                    }
+                }
+            } while ( ++start != end );
+            
+            /*for (int i = 0; i < os.mem.poolSize(); i++) {
+                Serial.printf("%08X ", os.mem.pool[i]);
+                if (!((i+1)%8)) Serial.println();
+            }*/
+            
+            os.tasks_to_destroy = false;
+        }
+        
+        stack_frame_t *p;
+        for ( p = os.root_frame; p; p = p->next ) {
+            uint32_t *top       = p->stack_top;
+            uint32_t *bottom    = p->stack_bottom;
+            uint32_t free       = 0;
+            
+            do {
+                if ( *bottom++ == os.memory_fill_pattern ) free++;
+                else break;
+            } while ( top != bottom );
+            p->free_memory = p->sp - p->stack_bottom;
+            if ( free <= 10 ) {
+                
+            }
+            if ( p->next == os.root_frame ) break;
+        }
+        yield( );
+    }
+}
+
+void hard_fault_isr( void ) {
+    Serial.print( "os.current_frame: " );
+    Serial.print( os.current_frame->address );
+    Serial.print( " | os.current_frame->next: " );
+    Serial.println( os.current_frame->next->address );
+    uint32_t reg = 0x02;
+    asm volatile( "MRS %[sp], PSP"   "\n" : [sp] "= r" ( reg ): : );
+    Serial.print("sp: ");
+    Serial.println( reg, HEX );
+    
+    asm volatile( "MOV %[r1], r1"   "\n" : [r1] "= r" ( reg ): : );
+    Serial.print( "r1: " );
+    Serial.println( reg, HEX );
+    
+    asm volatile( "MOV %[r2], r2"   "\n" : [r2] "= r" ( reg ): : );
+    Serial.print( "r2: " );
+    Serial.println( reg, HEX );
+    
+    asm volatile( "MOV %[r3], r3"   "\n" : [r3] "= r" ( reg ): : );
+    Serial.print( "r3: " );
+    Serial.println( reg, HEX );
+    
+    asm volatile( "MOV %[r4], r4"   "\n" : [r4] "= r" ( reg ): : );
+    Serial.print( "r4: " );
+    Serial.println( reg, HEX );
+    
+    asm volatile( "MOV %[r5], r5"   "\n" : [r5] "= r" ( reg ): : );
+    Serial.print( "r5: " );
+    Serial.println( reg, HEX );
+    
+    asm volatile( "MOV %[r6], r6"   "\n" : [r6] "= r" ( reg ): : );
+    Serial.print( "r6: " );
+    Serial.println( reg, HEX );
+    
+    asm volatile( "MOV %[sp], r7"   "\n" : [sp] "= r" ( reg ): : );
+    Serial.print( "r7: " );
+    Serial.println( reg, HEX );
+    
+    asm volatile( "MOV %[sp], r8"   "\n" : [sp] "= r" ( reg ): : );
+    Serial.print( "r8: " );
+    Serial.println( reg, HEX );
+    
+    asm volatile( "MOV %[sp], r9"   "\n" : [sp] "= r" ( reg ): : );
+    Serial.print( "r9: " );
+    Serial.println( reg, HEX );
+    
+    asm volatile( "MOV %[sp], r10"   "\n" : [sp] "= r" ( reg ): : );
+    Serial.print( "r10: " );
+    Serial.println( reg, HEX );
+    
+    asm volatile( "MOV %[sp], r11"   "\n" : [sp] "= r" ( reg ): : );
+    Serial.print( "r11: " );
+    Serial.println( reg, HEX );
+    
+    asm volatile( "MOV %[sp], r12"   "\n" : [sp] "= r" ( reg ): : );
+    Serial.print( "r12: " );
+    Serial.println( reg, HEX );
+    
+    while ( 1 ) if ( SIM_SCGC4 & SIM_SCGC4_USBOTG ) usb_isr( );
+}
+
+void start_os( void ) {
+    if ( os.num_task <= 0 ) return;             // if no task return
+    os.current_frame = os.root_frame;           // current frame starts as root
+    void *arg = os.root_frame->arg;             // get root frame's arg
+    stack_frame_t *p = os.current_frame->next;  // p point to the next frame in the list
+    os.begin = true;                            // allow context switch
+    __disable_irq( );
+    // kernal uses msp and all tasks use the psp stack pointer.
+    asm volatile(
+                 "MSR MSP, %[kernal]"     "\n\t"
+                 "MSR PSP, %[task]"       "\n"
+                 :
+                 : [kernal] "r" ( os.current_frame->sp ), [task] "r" ( p->sp )
+                 :
+                 );
+    __enable_irq( );
+    os.root_frame->ptr( arg );          // call first frame's function, starts scheduler
+    os.root_frame->state = TaskInvalid; // update state, after return.
+    for (;;) yield( );                  // keep things rolling
+}
+//////////////////////////////////////////////////////////////////////
 // Initialize main stack
 //////////////////////////////////////////////////////////////////////
-void init_stack( uint32_t main_stack, uint32_t pattern_override ) {
-    num_task = 0;
-    psp_fill_pattern = pattern_override;
-    
-    int i = 0;
-    for (i = 0; i < MAX_TASKS; i++) {
-        volatile stack_frame_t *u = &process_tasks[i];
-        u->address = 0;
-        u->state = TaskInvalid;
-    }
-    int stack_size = main_stack;
-    stack_size = ( stack_size + sizeof (uint32_t) ) / sizeof (uint32_t) * sizeof (uint32_t);
-    asm volatile( "MRS %[result], MSP\n" : [result] "=r" (stackroot) );
-    volatile stack_frame_t *p = &process_tasks[num_task];
-    
-    if ( stack_size >= MIN_MAIN_STACK_SIZE ) {
-        p->initial_sp = stackroot;
-        p->stack_size = stack_size;
-        stackroot -= stack_size;
-    }
-    else {
-        p->stack_size = MIN_MAIN_STACK_SIZE;
-        p->initial_sp = stackroot;
-        stackroot -= MIN_MAIN_STACK_SIZE;
-    }
-    p->address = 1;
-    p->state = TaskCreated;
-    task_mask = ( 1 << 0 );
+void init_stack( uint32_t memory_fill ) {
+    os.memory_fill_pattern = memory_fill; // memory fill pattern
+    os.num_task            = 0;           // number of tasks
+    os.begin               = false;       // context switch don't start until true
+    os.current_frame       = NULL;        // context switch frame pointer
+    os.root_frame          = NULL;        // kernal frame pointer
+    os.tasks_to_destroy    = false;
 }
 //////////////////////////////////////////////////////////////////////
-// This routine is the task's launch pad routine
+// Task's launch pad
 //////////////////////////////////////////////////////////////////////
 static void task_start( ) {
-    stack_frame_t* p;
-#if defined(KINETISK)
-    asm volatile( "mov %[result], r12\n" : [result] "=r" ( p ) );		 // r12 points to task initially
-#elif defined(KINETISL)
-    asm volatile("mov %[result], r7\n" : [result] "=r" ( p ) );     // r7 points to task initially
-#endif
-    asm volatile( "mov r0, %[value]\n" : : [value] "r" ( p->arg ) );	 // Supply void *arg to task call
-    asm volatile( "mov r1, %[value]\n" : : [value] "r" ( p->func_ptr ) );// r1 now holds the function ptr to call
-#if defined(KINETISK)
-    asm volatile( "push {r2-r12}" ); // push to stack
-    asm volatile( "blx  r1\n" );     // func(arg) call
-    asm volatile( "pop  {r2-r12}" ); // pop from stack if task is returned
-#elif defined(KINETISL)
-    asm volatile("push {r4-r7}\n");  // push r4-r7 to stack
-    //asm volatile("push {r3}\n");     // push r3 to stack
-    //asm volatile("mov r4,r8\n");     // mov r8 to r4
-    //asm volatile("mov r5,r9\n");     // mov r9 to r5
-    //asm volatile("push {r4,r5}\n");	 // Push r8,r9
-    
-    asm volatile("blx  r1\n");       // func(arg) call
-    
-    //asm volatile("pop {r4,r5}\n");   // pop r,8,r9
-    //asm volatile("mov r8,r4\n");     // r4 to r8
-    //asm volatile("mov r9,r5\n");     // r5 to r9
-    //asm volatile("pop {r3}\n");      // pop r3 from stack
-    asm volatile("pop  {r4-r7}\n");  // pop r4-r7 from stack
-#endif
-    p->state = TaskReturned;		 // update state when task has returned
-    
-    for (;;) yield( );               // returned task now loop here till restarted
+    volatile stack_frame_t *p;
+    // r12 points to the os struct, set in create
+    asm volatile( "mov %[result], r12\n" : [result] "=r" ( p ) );
+    // r0 now holds void *arg for task call
+    asm volatile( "mov r0, %[value]\n" : : [value] "r" ( p->arg ) );
+    // r1 now holds the user supplied task function
+    asm volatile( "mov r1, %[value]\n" : : [value] "r" ( p->ptr ) );
+    // save function pointer for return
+    volatile task_func_t fptr = p->ptr;
+    // call the task supplied in r1
+    asm volatile( "blx  r1\n" );
+    // task is returned remove it from linked list
+    p = remove_task_from_runlist( fptr );
+    if ( p != NULL ) p->state = TaskReturned;
+    // task stops here with a call to yield
+    yield( );
 }
 //////////////////////////////////////////////////////////////////////
-// Set up a task to execute (but don't launch it)
+// Set up a task to execute, will launch when yield switches in
 //////////////////////////////////////////////////////////////////////
-#if defined(KINETISL)
-TaskState task_create( volatile stack_frame_t *frame, size_t stack_size, task_func_t func, void *arg ) {
-    asm volatile("push {r0,r1,r2,r3}\n");
-    asm volatile("stmia r0!,{r4,r5,r6,r7}\n");       // Save lower regs
-    asm volatile("mov r1,r8\n");
-    asm volatile("mov r2,r9\n");
-    asm volatile("mov r3,sl\n");
-    asm volatile("stmia r0!,{r1,r2,r3}\n");		// Save r8,r9 & sl
-    asm volatile("mov r1,fp\n");
-    asm volatile("mov r3,lr\n");
-    asm volatile("stmia r0!,{r1,r2,r3}\n");		// Save fp,(placeholder for sp) & lr
-    asm volatile("pop {r0,r1,r2,r3}\n");		// Restore regs
-    frame->stack_size = stack_size;		// In r1
-    frame->func_ptr 	= func;			// In r2
-    frame->arg 	= arg;			// In r3
-    frame->r7	= (uint32_t)frame;	// Overwrite r12 with fiber ptr
-    frame->sp = stackroot;			// Save as Fiber's sp
-    frame->lr = (void *) task_start;	// Fiber startup code
-    frame->state = TaskCreated;		// Set state of this fiber
-    frame->initial_sp = stackroot;		// Save sp for restart()
-    stackroot    -= stack_size;             // This is the new root of the stack
-    int address   = 1 << num_task;          // get task address
-    frame->address   |= address;                // set task address
-    task_mask     = task_mask | ( 1 << num_task ); // task swap mask
-    init_mask     = task_mask;              // num of tasks
-    return TaskCreated;
-}
-#elif defined(KINETISK)
-TaskState task_create( task_func_t func, size_t stack_size, void *arg ) {
-    volatile stack_frame_t *p = &process_tasks[num_task]; // Task struct
-    asm volatile( "STMEA %0,{r1-r11}\n" : "+r" ( p ) :: "memory" );// Save r1-r11 to task struct
-    p->stack_size = stack_size;     // Save task size
-    p->func_ptr   = func;           // Save task function
-    p->arg        = arg;            // Save task arg
-    p->r12        = ( uint32_t )p;  // r12 points to struct
-    p->sp         = stackroot;              // Save as tasks's sp
-    p->state      = TaskCreated;		    // Set state of this task
-    p->initial_sp = stackroot;		        // Save sp for restart()
-    p->lr         = ( void * ) task_start;	// Task startup code
-    stackroot    -= stack_size;             // This is the new root of the stack
-    int address   = 1 << num_task;          // get task address
-    p->address   |= address;                // set task address
-    task_mask     = task_mask | ( 1 << num_task ); // task swap mask
-    init_mask     = task_mask;              // num of tasks
-    return TaskCreated;
-}
-#endif
-//////////////////////////////////////////////////////////////////////
-// Swap one task for another. This should be optimized as much as possible
-//////////////////////////////////////////////////////////////////////
-void task_swap( volatile stack_frame_t *prevframe, volatile stack_frame_t *nextframe ) {
-#if defined(KINETISK)
-    asm volatile (
-                  "MRS %[result], MSP\n"
-                  : [result] "=r" ( prevframe->sp )
-                  );
-    asm volatile (
-                  "ADD r0, #4"             "\n\t"   // &prevframe->r2
-                  "STMEA r0!,{r2-r12,lr}"  "\n\t"   // Save r2-r12 + lr
-                  "LDMIA r1,{r1-r12,lr}"   "\n\t"   // Restore r1(sp) and r2-r12, lr
-                  "MSR MSP, r1"            "\n\t"   // Set new sp
-                  "BX lr"                  "\n"
-                  );
-#elif defined(KINETISL)
-    asm volatile("stmia r0!,{r4-r7}\n");	// Save r4,r5,r6,r7
-    asm volatile("mov r2,r8\n");            // mov r8 to r2
-    asm volatile("mov r3,r9\n");            // mov r9 to r3
-    asm volatile("mov r4,sl\n");            // mov sl to r4
-    asm volatile("stmia r0!,{r2-r4}\n");	// Save r8,r9,sl
-    asm volatile("mov r2,fp\n");            // mov fp to r2
-    asm volatile("mov r3,sp\n");            // mov sp to r3
-    asm volatile("mov r4,lr\n");            // mov lr to r4
-    asm volatile("stmia r0!,{r2-r4}\n");	// Save fp,sp,lr
-    
-    asm volatile("add r1,#16");             // r0 = &nextfibe->r8
-    asm volatile("ldmia r1!,{r2-r4}\n");	// Load values for r8,r9,sl
-    asm volatile("mov r8,r2\n");            // mov r2 to r8
-    asm volatile("mov r9,r3\n");            // mov r3 to r9
-    asm volatile("mov sl,r4\n");            // mov r4 to sl
-    asm volatile("ldmia r1!,{r2-r4}\n");	// Load values for fp,sp,lr
-    asm volatile("mov fp,r2\n");            // mov fp to r2
-    asm volatile("mov sp,r3\n");            // mov sp to r3
-    asm volatile("mov lr,r4\n");            // mov lr to r4
-    asm volatile("sub r1,#40\n");           // r0 = nextfibe
-    asm volatile("ldmia r1!,{r4-r7}\n");	// Restore r4-r7
-#endif
+stack_frame_t *task_create( task_func_t func, mem_block_t *block, void *arg ) {
+    uint32_t frame_size  = ( sizeof( stack_frame_t ) ) >> 2;// size of struct in words
+    uint32_t address = os.num_task;                         // each task has unique address
+    uint32_t stack_size = block->length - frame_size;
+    uint32_t *stack = ( uint32_t * )block->block;
+    stack_frame_t *p = ( stack_frame_t * )stack;
+    *p = { 0 };
+    if ( os.root_frame == NULL ) os.root_frame = p;
+    p->sp           = ( uint32_t * )stack + stack_size + frame_size;
+    p->r12          = ( uint32_t * )p;
+    p->lr           = ( uint32_t * )task_start;
+    p->address      = address;
+    p->stack_top    = ( uint32_t * )stack + stack_size + frame_size;
+    p->stack_bottom = ( uint32_t * )stack + frame_size;
+    p->ptr          = func;
+    p->arg          = arg;
+    p->state        = TaskCreated;
+    add_task_to_runlist( p->ptr );
+    return p;
 }
 //////////////////////////////////////////////////////////////////////
 // all invocations of yield in teensyduino api go through this now.
 //////////////////////////////////////////////////////////////////////
+#if defined(KINETISL)
+void task_swap( stack_frame_t *prevframe, stack_frame_t *nextframe ) {
+    asm volatile (
+                  "MRS r3, PSP"         "\n\t" // move sp to r3
+                  "STMIA r0!,{r3-r7}"   "\n\t" // Save to r0! from r3-r7
+                  "MOV r2,r8"           "\n\t" // move r8 into r2
+                  "MOV r3,r9"           "\n\t" // move r9 into r3
+                  "MOV r4,sl"           "\n\t" // move sl into r4
+                  "MOV r5,fp"           "\n\t" // move fp into r5
+                  "MOV r6,ip"           "\n\t" // move ip into r6
+                  "MOV r7,lr"           "\n\t" // move lr into r7
+                  "STMIA r0!,{r2-r7}"    "\n\t" // Save to r0 from r2-r7*/
+                  
+                  "ADD r1,#20"          "\n\t" // increment r1 address 20
+                  "LDMIA r1!,{r2-r7}"   "\n\t" // load r2-r7 from r1!
+                  "MOV r8,r2"           "\n\t" // move r2 into r8
+                  "MOV r9,r3"           "\n\t" // move r3 into r9
+                  "MOV sl,r4"           "\n\t" // move r4 into sl
+                  "MOV fp,r5"           "\n\t" // move r5 into fp
+                  "MOV ip,r6"           "\n\t" // move r6 into ip
+                  "MOV lr,r7"           "\n\t" // move r7 into lr
+                  "SUB r1,#44"          "\n\t" // decrement r1 address 44
+                  "LDMIA r1!,{r3-r7}"   "\n\t" // load r3-r7 from r1
+                  "MSR PSP, r3"         "\n"   // move r3 into sp
+                  );
+}
+#endif
+
 void yield( void ) {
-    //digitalWriteFast(16, HIGH);
-    // There is only the main context running
-    if ( num_task <= 0 ) return;
-#ifdef USE_INTERRUPTS
-    __disable_irq( );
+    if ( !os.begin ) return;
+    stack_frame_t *p1 = os.current_frame;
+    stack_frame_t *p2 = os.current_frame->next;
+    os.current_frame  = p2;
+    uint32_t fOut = p1->address;
+    uint32_t fIn  = p2->address;
+    if ( !fIn || !fOut ) {
+        if ( !fIn && !fOut ) {
+            uint32_t reg = 0x00;
+            asm volatile(
+                         "MSR CONTROL, %[msp]"  "\n\t"
+                         "ISB"                  "\n\t"
+                         :
+                         : [msp] "r" ( reg )
+                         :
+                         );
+            asm volatile (
+                          "MOV r0, %[frameOut]"     "\n\t" // r0 holds p1
+                          "MRS r3, MSP"             "\n\t" // move msp into r3
+                          "STMIA r0,{r3-r12, lr}"   "\n\t" // Save r3-r12 + lr
+                          "MOV r1, %[frameIn]"      "\n\t" // r1 holds p2
+                          "LDMIA r1,{r3-r12, lr}"   "\n\t" // Restore r1(sp) and r4-r12, lr
+                          "MSR MSP, r3"             "\n"   // Set new msp
+                          : [frameOut] "+r" ( p1 )
+                          : [frameIn] "r" ( p2 )
+                          : "r3"
+                          );
+        } else if ( !fOut ) {
+            uint32_t reg = 0x02;
+            asm volatile(
+                         "MSR CONTROL, %[psp]"  "\n\t"
+                         "ISB"                  "\n\t"
+                         :
+                         : [psp] "r" ( reg )
+                         );
+            asm volatile (
+                          "MOV r0, %[frameOut]"     "\n\t" // r0 holds p1
+                          "MRS r3, MSP"             "\n\t" // move msp into r3
+                          "STMIA r0,{r3-r12, lr}"   "\n\t" // Save r3-r12 + lr
+                          "MOV r1, %[frameIn]"      "\n\t" // r1 holds p2
+                          "LDMIA r1,{r3-r12, lr}"   "\n\t" // Restore r1(sp) and r4-r12, lr
+                          "MSR PSP, r3"             "\n"   // Set new psp
+                          : [frameOut] "+r" ( p1 )
+                          : [frameIn] "r" ( p2 )
+                          : "r3"
+                          );
+        } else {
+            uint32_t reg = 0x00;
+            asm volatile(
+                         "MSR CONTROL, %[msp]"  "\n\t"
+                         "ISB"                  "\n\t"
+                         :
+                         : [msp] "r" ( reg )
+                         :
+                         );
+            asm volatile (
+                          "MOV r0, %[frameOut]"     "\n\t" // r0 holds p1
+                          "MRS r3, PSP"             "\n\t" // move psp into r3
+                          "STMIA r0,{r3-r12, lr}"   "\n\t" // Save r3-r12 + lr
+                          "MOV r1, %[frameIn]"      "\n\t" // r1 holds p2
+                          "LDMIA r1,{r3-r12, lr}"   "\n\t" // Restore r1(sp) and r4-r12, lr
+                          "MSR MSP, r3"             "\n"   // Set new msp
+                          : [frameOut] "+r" ( p1 )
+                          : [frameIn] "r" ( p2 )
+                          : "r3"
+                          );
+        }
+        
+    } else {
+        uint32_t reg = 0x02;
+        asm volatile(
+                     "MSR CONTROL, %[psp]"  "\n\t"
+                     "ISB"                  "\n\t"
+                     :
+                     : [psp] "r" ( reg )
+                     :
+                     );
+        asm volatile (
+                      "MOV r0, %[frameOut]"     "\n\t" // r0 holds p1
+                      "MRS r3, PSP"             "\n\t" // move psp into r3
+                      "STMIA r0,{r3-r12, lr}"   "\n\t" // Save r3-r12 + lr
+                      "MOV r1, %[frameIn]"      "\n\t" // r1 holds p2
+                      "LDMIA r1,{r3-r12, lr}"   "\n\t" // Restore r1(sp) and r4-r12, lr
+                      "MSR PSP, r3"             "\n"   // Set new psp
+                      : [frameOut] "+r" ( p1 )
+                      : [frameIn] "r" ( p2 )
+                      : "r3"
+                      );
+    }
+    
+#if defined(KINETISK)
+    /*asm volatile (
+                  "MOV r0, %[frameOut]"     "\n\t" // r0 holds p1
+                  "MRS r3, PSP"             "\n\t" // move sp into r3
+                  "STMIA r0,{r3-r12, lr}"   "\n\t" // Save r3-r12 + lr
+                  "MOV r1, %[frameIn]"      "\n\t" // r1 holds p2
+                  "LDMIA r1,{r3-r12, lr}"   "\n\t" // Restore r1(sp) and r4-r12, lr
+                  "MSR PSP, r3"             "\n"   // Set new sp
+                  :
+                  : [frameOut] "r" ( p1 ), [frameIn] "r" ( p2 )
+                  );*/
+
+    /*asm volatile (
+                  "MOV r1, %[begin]"                "\n\t" // r0 holds p1
+                  "cbz r1, end"                     "\n\t" // r0 holds p1
+                  "MOV r0, %[frameOut]"             "\n\t" // r0 holds p1
+                  "MRS r3, MSP"                     "\n\t" // move sp into r3
+                  "STMIA r0,{r3-r12, lr}"           "\n\t" // Save r3-r12 + lr
+                  "MOV r1, %[frameIn]"              "\n\t" // r1 holds p2
+                  "LDMIA r1,{r3-r12, lr}"           "\n\t" // Restore r1(sp) and r4-r12, lr
+                  "MSR MSP, r3"                     "\n\t"   // Set new sp
+                  "MOV %[frameOut], %[frameIn]"     "\n\t"
+                  "end:"                            "\n" // r0 holds p1
+                  : [frameOut] "+r" ( os.current_frame )
+                  : [frameIn] "r" ( os.current_frame->next ), [begin] "r" ( os.begin )
+                  );*/
+    
+#elif defined(KINETISL)
+    task_swap( p1, p2 );
 #endif
-    uint32_t mask = task_mask;
-    uint32_t tail = __builtin_ctz( mask );
-    mask &= ( mask - 1 );
-    uint32_t head = __builtin_ctz( mask );
-    if(head > num_task) head = 0;
-    // previous task to be stored
-    volatile stack_frame_t *last = &process_tasks[tail];
-    // next task to be loaded
-    volatile stack_frame_t *next = &process_tasks[head];
-    enum TaskState  lst = last->state;
-    enum TaskState  nxt = next->state;
-    // set previous state to created or returned
-    enum TaskState l = ( lst != TaskReturned ) ? TaskCreated : TaskReturned;
-    last->state = ( lst == TaskPause ) ? TaskPause : l;
-    // set current state to executing or returned
-    enum TaskState n = ( nxt != TaskReturned ) ? TaskExecuting : TaskReturned;
-    next->state = ( nxt == TaskPause ) ? TaskPause : n;
-    // update next task
-    const uint32_t init = init_mask;
-    task_mask = mask == 0 ? init : mask;
-    // make the swap
-    task_swap( last, next );
-#ifdef USE_INTERRUPTS
-    __enable_irq( );
-#endif
-    //digitalWriteFast(16, LOW);
 }
 //////////////////////////////////////////////////////////////////////
 // pass task state, pass loop state
-// ** calls low priority software isr to update **
 //////////////////////////////////////////////////////////////////////
 TaskState task_state( task_func_t func ) {
-    FUNCTION = func;
-    CALLING_FUNCTION = TASK_STATE;
-    NVIC_SET_PENDING( IRQ_RTC_SECOND );
-    while( update_in_progress ) ;
-    return _STATE;
-}
-TaskState main_state( loop_func_t func ) {
-    LOOP_FUNCTION = func;
-    CALLING_FUNCTION = MAIN_STATE;
-    NVIC_SET_PENDING( IRQ_RTC_SECOND );
-    while( update_in_progress ) ;
-    return _STATE;
+    mem_block_t *start = os.mem.allocList( );
+    mem_block_t *end = start + 31;
+    do {
+        if ( start->block != 0 ) {
+            stack_frame_t *p = ( stack_frame_t * )start->block;
+            if ( p->ptr == func ) return p->state;
+        }
+    } while ( ++start != end );
+    return TaskInvalid;
 }
 //////////////////////////////////////////////////////////////////////
 // routine to block until selected task return's.
 //////////////////////////////////////////////////////////////////////
-TaskState task_sync( task_func_t func ) {
-    enum TaskState return_state;
-    do {
-        yield( );
-        return_state = task_state( func );
-    }
-    while ( ( return_state == TaskCreated ) || ( return_state == TaskPause )  ) ; // Keep waiting
-    return return_state;
+void task_sync( void ) {
+    /*task_frame_t *p;
+    bool first_state = true;
+    uint8_t first_state_address = 0;
+    uint8_t last_state_address = 0;
+    for (int i = 0; i < os.num_task; i++) {
+        p = &os.task[i];
+        if ( p->state == TaskCreated ) {
+            task_restart( p->ptr );
+            //os.current_frame = &os.frame[i];
+            //void *arg = p->arg;
+            //p->ptr( arg );
+        }
+    }*/
 }
 //////////////////////////////////////////////////////////////////////
-// start up returned task
-// ** calls low priority software isr to update **
+// restart a task or restart up returned task
 //////////////////////////////////////////////////////////////////////
 TaskState task_restart( task_func_t func ) {
-    FUNCTION = func;
-    CALLING_FUNCTION = RESTART;
-    update_in_progress = true;
-    NVIC_SET_PENDING( IRQ_RTC_SECOND );
-    while( update_in_progress ) ;
-    return _STATE;
+    stack_frame_t *p = add_task_to_runlist( func );
+    if ( p != NULL ) {
+        p->state    = TaskCreated;
+        p->sp       = p->stack_top;
+        p->r12      = ( uint32_t * )p;
+        p->lr       = ( uint32_t * )task_start;
+        return p->state;
+    }
+    return TaskInvalid;
+}
+//////////////////////////////////////////////////////////////////////
+// restart all tasks
+//////////////////////////////////////////////////////////////////////
+void task_restart_all( void ) {
+    mem_block_t *start = os.mem.allocList( );
+    mem_block_t *end = start + 31;
+    do {
+        if ( start->block != 0 ) {
+            stack_frame_t *p = ( stack_frame_t * )start->block;
+            add_task_to_runlist( p->ptr );
+            p->state = TaskCreated;
+            p->sp    = p->stack_top;
+            p->r12   = ( uint32_t * )p;
+            p->lr    = ( uint32_t * )task_start;
+        }
+    } while ( ++start != end );
 }
 //////////////////////////////////////////////////////////////////////
 // pause running task
-// ** calls low priority software isr to update **
 //////////////////////////////////////////////////////////////////////
 TaskState task_pause( task_func_t func ) {
-    FUNCTION = func;
-    CALLING_FUNCTION = PAUSE;
-    update_in_progress = true;
-    NVIC_SET_PENDING( IRQ_RTC_SECOND );
-    while( update_in_progress ) ;
-    return _STATE;
+    stack_frame_t *p = remove_task_from_runlist( func );
+    if ( p == NULL ) return TaskInvalid;
+    p->state = TaskPaused;
+    return p->state;
 }
 //////////////////////////////////////////////////////////////////////
 // start paused task
-// ** calls low priority software isr to update **
 //////////////////////////////////////////////////////////////////////
 TaskState task_resume( task_func_t func ) {
-    FUNCTION = func;
-    CALLING_FUNCTION = RESUME;
-    update_in_progress = true;
-    NVIC_SET_PENDING( IRQ_RTC_SECOND );
-    while( update_in_progress ) ;
-    return _STATE;
+    stack_frame_t *p = add_task_to_runlist( func );
+    if ( p == NULL ) return TaskInvalid;
+    p->state = TaskCreated;
+    return p->state;
 }
 //////////////////////////////////////////////////////////////////////
-// TODO: return task unused size, not working yet
+// return task unused memory, only returns active tasks memory
 //////////////////////////////////////////////////////////////////////
 uint32_t task_memory( task_func_t func ) {
-    FUNCTION = func;
-    CALLING_FUNCTION = MEMORY;
-    update_in_progress = true;
-    NVIC_SET_PENDING( IRQ_RTC_SECOND );
-    while( update_in_progress ) ;
-    return STACK_MEMORY;
-}
-
-uint32_t main_memory( loop_func_t func ) {
-    volatile stack_frame_t *p = &process_tasks[0];
-    return p->initial_sp;
-}
-//////////////////////////////////////////////////////////////////////
-// low priority isr to update or change the state of each task
-//////////////////////////////////////////////////////////////////////
-void rtc_seconds_isr(void) {
-    task_func_t f_ptr;
-    TaskState state;
-    uint32_t num;
-    int i = 0;
-    volatile stack_frame_t *p;
-    do {
-        p = &process_tasks[i];
-        f_ptr = p->func_ptr;
-        if ( i > num_task ) {
-            _STATE = TaskInvalid;
-            update_in_progress = false;
-            return;
-        }
-        i++;
-    } while ( FUNCTION != f_ptr  );
-    
-    /* call function handlers */
-    switch ( CALLING_FUNCTION ) {
-        case PAUSE:
-            p = &process_tasks[i-1];
-            state = p->state;
-            if ( state == TaskPause ) {
-                _STATE = TaskPause;
-                update_in_progress = false;
-                break;
-            }
-            p->state = TaskPause;
-            num = init_mask;
-            num &= ~( p->address );
-            init_mask = num;
-            _STATE = TaskPause;
-            update_in_progress = false;
-            break;
-        case RESUME:
-            p = &process_tasks[i-1];
-            state = p->state;
-            _STATE = state;
-            if ( state != TaskPause ) {
-                update_in_progress = false;
-                break;
-            }
-            p->state = TaskCreated;
-            num = init_mask;
-            num |= ( p->address );
-            init_mask = num;
-            _STATE = TaskCreated;
-            update_in_progress = false;
-            break;
-        case RESTART:
-            p = &process_tasks[i-1];
-            state = p->state;
-            if ( state != TaskReturned ) {
-                _STATE = TaskInvalid;
-                update_in_progress = false;
-                break;
-            }
-            p->state = TaskCreated;
-#if defined(KINETISK)
-            p->r12 = ( uint32_t )p;
-#elif defined(KINETISL)
-            p->r7 = ( uint32_t )p;
-#endif
-            p->func_ptr = FUNCTION;
-            p->lr = ( void * )task_start;
-            p->sp = p->initial_sp;
-            _STATE = TaskCreated;
-            update_in_progress = false;
-            break;
-        case TASK_STATE:
-            p = &process_tasks[i-1];
-            _STATE = p->state;
-            update_in_progress = false;
-            break;
-        case MAIN_STATE:
-            p = &process_tasks[0];
-            _STATE = p->state;
-            update_in_progress = false;
-            break;
-        case MEMORY:
-        {
-            p = &process_tasks[i-1];
-            volatile uint32_t *start = (volatile uint32_t *)p->initial_sp;
-            volatile const uint32_t *stop = start - (p->stack_size/4);
-            int count = 0;
-            while ( start >= stop ) {
-                //__disable_irq();
-                if(*start == 0xFFFFFFFF) count++;
-                start--;
-                //__enable_irq();
-            }
-            STACK_MEMORY = (count-1)*4;
-            update_in_progress = false;
-        }
-            break;
-            
-        default:
-            update_in_progress = false;
-            break;
+    stack_frame_t *p;
+    for ( p = os.root_frame; p; p = p->next ) {
+        if ( p->ptr == func ) return p->free_memory;
+        if ( p->next == os.root_frame ) return 0;
     }
+    return 0;
 }
+//////////////////////////////////////////////////////////////////////
+// remove task from the run list
+//////////////////////////////////////////////////////////////////////
+stack_frame_t *remove_task_from_runlist( task_func_t func ) {
+    stack_frame_t *p, *prev;
+    prev = NULL;
+    for ( p = os.root_frame; p; p = p->next ) {
+        if ( p->ptr == func ) {
+            prev->next = p->next;
+            
+            if ( p->state == TaskDestroyable ) {
+                p->ptr = NULL;
+                os.tasks_to_destroy = true;
+                return NULL;
+            }
+            return p;
+        }
+        prev = p;
+        if ( p->next == os.root_frame ) break;
+    }
+    return NULL;
+}
+//////////////////////////////////////////////////////////////////////
+// remove task from the run list
+//////////////////////////////////////////////////////////////////////
+stack_frame_t *add_task_to_runlist( task_func_t func ) {
+    stack_frame_t *p = NULL, *prev = NULL, *ret = NULL;
+    mem_block_t *start = os.mem.allocList( );
+    mem_block_t *end = start + 31;
+    do {
+        if ( start->block != 0 ) {
+            p = ( stack_frame_t * )start->block;
+            if ( p->ptr == func ) {
+                if ( p != os.root_frame ) prev->next = p;
+                p->next = os.root_frame;
+                prev = p;
+                ret = p;
+            } else if ( p->state == TaskCreated || p->state == TaskDestroyable ) {
+                if ( p != os.root_frame ) prev->next = p;
+                p->next = os.root_frame;
+                prev = p;
+            }
+        }
+    } while ( ++start != end );
+    return ret;
+}
+//////////////////////////////////////////////////////////////////////
+// set max memory usage threshold
+//////////////////////////////////////////////////////////////////////

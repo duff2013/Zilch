@@ -1,34 +1,89 @@
-/*******************************
- * This shows how to pause and
- * resume a task from another
- * task.
- ******************************/
+/*
+ This example shows how to pause a task. The paused task will
+ stop wherever in its code. The paused tasks will be taken out
+ of the context switch so the overall 'os' performance will
+ increase.
+ */
 #include <zilch.h>
 
-Zilch task(1000);// main task
+// zilch os object
+Zilch task;
 /*******************************************************************/
+/*
+ Stack size is calculated in increments of 32 bits.
+ So 64 is 256 bytes of space.
+ */
+#define TASK1_STACK_SIZE 64
+#define TASK2_STACK_SIZE 64
+
 void setup() {
-  delay(2000);
-  pinMode(LED_BUILTIN , OUTPUT);
-  task.create(task1, 200, 0);
-}
-
-// main thread
-void loop() {
-  Serial.println("Pause task1");
-  task.pause( task1 );
-  delay(500);
-  Serial.println("Resume task1");
-  delay(500);
-  task.resume( task1 );
-  delay(500);
+    /*
+     Use the MPSS MACRO (memory pool stack size)
+     to calculated actual stack size the memory
+     manager allocates. Add these MPSS stack
+     size's together for memory pool size.
+     */
+    const uint32_t MEM_POOL_SIZE = TASK1_STACK_SIZE + TASK2_STACK_SIZE;
+    
+    // Allocate memory to the memory pool
+    AllocateMemoryPool(MEM_POOL_SIZE);
+    
+    pinMode(LED_BUILTIN , OUTPUT);
+    while (!Serial);
+    delay(100);
+    Serial.println("Starting tasks now...");
+    // create tasks but do not start 'os' yet
+    task.create(task1, TASK1_STACK_SIZE, 0);
+    task.create(task2, TASK2_STACK_SIZE, 0);
+    // start os, all tasks start here in order of 'create' functions
+    task.begin();
+    // should not get here
 }
 /*******************************************************************/
-// First task (coroutine)
-static void task1(void *arg) {
-  while ( 1 ) {
-    Serial.println("Running task1");
-    delay(10);
-  }
+//  Not used, if here error with Zilch
+void loop() {
+    digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+    Serial.println("ERROR");
+    delay(25);
 }
-
+/*******************************************************************/
+// First task
+static void task1(void *arg) {
+    elapsedMillis task2PauseTimer  = 0;
+    elapsedMillis task2ResumeTimer = 0;
+    bool Task2PauseTask = false;
+    while ( 1 ) {
+        
+        if (task2PauseTimer >= 5000 && !Task2PauseTask) {
+            Serial.println("\nTask 1 is Pausing Task 2");
+            // pause task 2 for 5000ms
+            task.pause(task2);
+            Task2PauseTask = true;
+            task2ResumeTimer = 0;
+        }
+        
+        if (task2ResumeTimer >= 5000 && Task2PauseTask) {
+            Serial.println("Task 1 is Resuming Task 2\n");
+            // resume task2, will start again where it was paused.
+            task.resume(task2);
+            Task2PauseTask = false;
+            task2PauseTimer = 0;
+        }
+        
+        yield();
+    }
+}
+/*******************************************************************/
+// 2nd task
+static void task2(void *arg) {
+    while ( 1 ) {
+        Serial.println("Task 2 code section 1");
+        delay(500);
+        Serial.println("Task 2 code section 2");
+        delay(500);
+        Serial.println("Task 2 code section 3");
+        delay(500);
+        Serial.println("Task 2 code section 4");
+        delay(500);
+    }
+}
