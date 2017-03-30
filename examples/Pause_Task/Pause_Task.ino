@@ -1,8 +1,8 @@
 /*
- This example shows how to pause a task. The paused task will
- stop wherever in its code. The paused tasks will be taken out
- of the context switch so the overall 'os' performance will
- increase.
+ *  This example shows how to pause a task. The paused task will
+ *  stop wherever in its code. The paused tasks will be taken out
+ *  of the context switch so the overall 'os' performance will
+ *  increase.
  */
 #include <zilch.h>
 
@@ -10,19 +10,14 @@
 Zilch task;
 /*******************************************************************/
 /*
- Stack size is calculated in increments of 32 bits.
- So 64 is 256 bytes of space.
+ *  Stack size is calculated in increments of 32 bits.
+ *  So a stack size of 64 equals 256 bytes of space.
  */
 #define TASK1_STACK_SIZE 64
 #define TASK2_STACK_SIZE 64
 
 void setup() {
-    /*
-     Use the MPSS MACRO (memory pool stack size)
-     to calculated actual stack size the memory
-     manager allocates. Add these MPSS stack
-     size's together for memory pool size.
-     */
+    // Add all stack sizes for creating memory pool
     const uint32_t MEM_POOL_SIZE = TASK1_STACK_SIZE + TASK2_STACK_SIZE;
     
     // Allocate memory to the memory pool

@@ -1,3 +1,6 @@
+><b>Updated (3/30/17 v3.4)</b><br>
+* Fixed documentation of examples and readme.
+
 ><b>Updated (3/29/17 v3.3)</b><br>
 * Offical Zilch release update.
 

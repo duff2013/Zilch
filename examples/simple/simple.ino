@@ -1,16 +1,13 @@
 /*
- Basic usage example.
+ *  Basic usage example.
  */
 #include <zilch.h>
 
-// Use default memory fill of 0xCDCDCDCD
 Zilch task;
-// Override default memory fill.
-//Zilch task(0xA5A5A5A5);
 /*******************************************************************/
 /*
- Stack size is calculated in increments of 32 bits.
- So 64 is 256 bytes of space.
+ *  Stack size is calculated in increments of 32 bits.
+ *  So a stack size of 64 equals 256 bytes of space.
  */
 #define TASK1_STACK_SIZE 64
 #define TASK2_STACK_SIZE 64
@@ -19,12 +16,7 @@ Zilch task;
 #define TASK5_STACK_SIZE 64
 
 void setup() {
-    /*
-     Use the MPSS MACRO (memory pool stack size)
-     to calculated actual stack size the memory
-     manager allocates. Add these MPSS stack
-     size's together for memory pool size.
-     */
+    // Add all stack sizes for creating memory pool
     const uint32_t MEM_POOL_SIZE =  TASK1_STACK_SIZE +
                                     TASK2_STACK_SIZE +
                                     TASK3_STACK_SIZE +

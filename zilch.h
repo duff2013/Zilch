@@ -36,8 +36,6 @@
  **************************************************/
 //#define USE_INTERRUPTS
 
-#define MPSS(STACK_SIZE) (((STACK_SIZE+28)/8)+1)*8
-
 class Zilch {
 private:
 public:
