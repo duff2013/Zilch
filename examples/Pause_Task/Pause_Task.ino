@@ -13,8 +13,8 @@ Zilch task;
  *  Stack size is calculated in increments of 32 bits.
  *  So a stack size of 64 equals 256 bytes of space.
  */
-#define TASK1_STACK_SIZE 64
-#define TASK2_STACK_SIZE 64
+#define TASK1_STACK_SIZE 128
+#define TASK2_STACK_SIZE 128
 
 void setup() {
     // Add all stack sizes for creating memory pool

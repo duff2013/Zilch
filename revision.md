@@ -1,3 +1,9 @@
+><b>Updated (4/8/17 v3.5)</b><br>
+* Fixed many bugs and speedup of memory manager.
+* Fixed destroyable tasks, now deletes memory correctly.
+* Fixed inline asm for starting tasks and returning tasks.
+* Only using MSP stack pointer now, will switch to PSP in future.
+
 ><b>Updated (3/30/17 v3.4)</b><br>
 * Fixed documentation of examples and readme.
 

@@ -28,7 +28,7 @@
 #define ZILCH_h
 #ifdef __cplusplus
 #include "utility/task.h"
-#include "utility/mem_manger.h"
+#include "utility/mem_manager.h"
 /**************************************************
  * This allows yield calls in a ISR not to lockup,
  * the kernel. Uncomment if any ISR calls yield in
@@ -50,7 +50,8 @@ public:
     TaskState restart           ( task_func_t task );
     TaskState state             ( task_func_t task );
     uint32_t  freeMemory        ( task_func_t task );
-    void      setMemoryWaterMark( uint16_t waterMark );
+    void      lowMemoryWaterMark( uint16_t waterMark );
+    void      printMemoryHeader ( void );
 };
 #endif
 #endif
