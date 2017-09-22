@@ -48,6 +48,7 @@ public:
     TaskState pause             ( task_func_t task );
     TaskState resume            ( task_func_t task );
     TaskState restart           ( task_func_t task );
+    TaskState stop              ( task_func_t task );
     TaskState state             ( task_func_t task );
     uint32_t  freeMemory        ( task_func_t task );
     void      lowMemoryWaterMark( uint16_t waterMark );

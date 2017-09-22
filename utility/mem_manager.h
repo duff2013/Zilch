@@ -14,7 +14,7 @@ class mem_manager;
 
 #define AllocateMemoryPool(len) ({                                                      \
     static DMAMEM uint32_t mem_pool[( 256 + ( len - 1 ) - ( ( len - 1 ) % 128 )) + 512];\
-    mem_manager::init( mem_pool, ( 256 + ( len - 1 ) - ( ( len - 1 ) % 128 )) + 512 );   \
+    mem_manager::init( mem_pool, ( 256 + ( len - 1 ) - ( ( len - 1 ) % 128 )) + 512 );  \
 })
 
 struct mem_block_t {

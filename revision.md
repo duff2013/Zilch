@@ -1,3 +1,7 @@
+><b>Updated (9/22/17 v3.6)</b><br>
+* increase sketch stack sizes.
+* minor fixes for starting tasks.
+
 ><b>Updated (4/8/17 v3.5)</b><br>
 * Fixed many bugs and speedup of memory manager.
 * Fixed destroyable tasks, now deletes memory correctly.

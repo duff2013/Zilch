@@ -13,10 +13,13 @@ yield	KEYWORD1
 state	KEYWORD1
 sync	KEYWORD1
 pause	KEYWORD1
+stop	KEYWORD1
 resume	KEYWORD1
 restart	KEYWORD1
 freeMemory	KEYWORD1
 restartAll	KEYWORD1
+lowMemoryWaterMark	KEYWORD1
+printMemoryHeader	KEYWORD1
 #######################################
 # Methods and Functions (KEYWORD2)
 #######################################
@@ -25,8 +28,8 @@ TaskCreated		KEYWORD2
 TaskPaused		KEYWORD2
 TaskReturned	KEYWORD2
 TaskInvalid		KEYWORD2
+TaskDestroyable KEYWORD2
 TASK_LOCK		KEYWORD2
-MPSS		KEYWORD2
 #######################################
 # Instances (KEYWORD2)
 #######################################

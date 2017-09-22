@@ -59,7 +59,7 @@ typedef struct {
     uint8_t                 num_task;
     boolean                 begin;
     boolean                 tasks_to_destroy;
-    mem_manager              mem;
+    mem_manager             mem;
 } os_t;
 
 #ifdef __cplusplus
@@ -74,6 +74,7 @@ extern "C" {
     TaskState task_restart             ( task_func_t func );
     TaskState task_pause               ( task_func_t func );
     TaskState task_resume              ( task_func_t func );
+    TaskState task_stop                ( task_func_t func );
     uint32_t  task_memory              ( task_func_t func );
     void      destroy_task             ( int index );
     __attribute__((noinline))
@@ -131,7 +132,6 @@ TaskState Zilch::createDestroyable ( task_func_t task, size_t stack_size, void *
 }
 
 void Zilch::begin( void ) {
-    
     start_os( );
 }
 
@@ -159,6 +159,10 @@ TaskState Zilch::restart( task_func_t task ) {
     return p;
 }
 
+TaskState Zilch::stop( task_func_t task ) {
+    //task_restart_all( );
+}
+
 void Zilch::restartAll( void ) {
     task_restart_all( );
 }
@@ -174,7 +178,7 @@ void Zilch::lowMemoryWaterMark( uint16_t threshold ) {
 void Zilch::printMemoryHeader( void ) {
     Serial.print("Pool Address: ");
     Serial.println((uint32_t)os.mem.pool, HEX);
-    for ( int i = 0; i < 128; i++ ) {
+    for ( int i = 0; i < os.mem.poolSize( ); i++ ) {
         unsigned long mask  = 0x0000000F;
         mask = mask << 28;
         for ( unsigned int n = 8; n > 0; --n ) {
@@ -337,32 +341,21 @@ static void task_start( void ) __attribute__((naked));
 static void task_start( void ) {
     volatile stack_frame_t *p;
     asm volatile(
-                 "push {r3-r5, lr}"     "\n\t"
-                 "mov r4, r12"          "\n\t"
+                 "push {r2-r12, lr}"     "\n\t"
+                 "mov r4, r12"          "\n\t"// r12 points to the stack frame
                  "ldr r3, [r4, #64]"    "\n\t"
-                 "mov r1, r3"           "\n\t"
+                 "mov r0, r3"           "\n\t"// r1 now holds the user supplied task function
                  "ldr r3, [r4, #60]"    "\n\t"
-                 "mov r0, r3"           "\n\t"
-                 "blx r0"               "\n\t"
+                 "mov r1, r3"           "\n\t"// r0 now holds void *arg for task call
+                 "blx r1"               "\n\t"
                  "mov %[result], r4"    "\n"
                  : [result] "=r" ( p )
                  :
                  : "r0", "r1", "r2", "r3", "r4", "r12", "memory"
                  );
-    // r12 points to the os struct, set in create
-    //asm volatile( "mov %[result], r12\n" : [result] "=r" ( p ) : : );
-    // r0 now holds void *arg for task call
-    //asm volatile( "mov r0, %[value]\n" : : [value] "r" ( p->arg ) );
-    // r1 now holds the user supplied task function
-    //asm volatile( "mov r1, %[value]\n" : : [value] "r" ( p->ptr ) );
-    //
-    //asm volatile( "blx  r1\n" );
-    //
-    //asm volatile( "mov %[result], r12\n" : [result] "=r" ( p ) : : );
     // task is returned remove it from linked list
-    //Serial.print("start task: ");
     p = remove_task_from_runlist2( p );
-    //
+    // if p == NULL task and memory are removed
     if ( p != NULL ) p->state = TaskReturned;
     // task stops here with a call to yield
     yield( );
@@ -596,6 +589,18 @@ TaskState task_restart( task_func_t func ) {
     return TaskInvalid;
 }
 //////////////////////////////////////////////////////////////////////
+// stop a task
+//////////////////////////////////////////////////////////////////////
+TaskState task_stop( task_func_t func ) {
+    mem_block_t *start = os.mem.allocList( );
+    mem_block_t *end = start + 31;
+    do {
+        if ( start->block != 0 ) {
+            stack_frame_t *p = ( stack_frame_t * )start->block;
+        }
+    } while ( ++start != end );
+}
+//////////////////////////////////////////////////////////////////////
 // restart all tasks
 //////////////////////////////////////////////////////////////////////
 void task_restart_all( void ) {
@@ -646,7 +651,7 @@ uint32_t task_memory( task_func_t func ) {
 //////////////////////////////////////////////////////////////////////
 stack_frame_t *remove_task_from_runlist2( volatile stack_frame_t *frame ) {
     stack_frame_t *p, *prev;
-    prev = NULL;
+    prev = os.root_frame;
     for ( p = os.root_frame; p; p = p->next ) {
         if ( p == frame ) {
             prev->next = p->next;
@@ -662,12 +667,18 @@ stack_frame_t *remove_task_from_runlist2( volatile stack_frame_t *frame ) {
     }
     return NULL;
 }
+
 stack_frame_t *remove_task_from_runlist( task_func_t func ) {
     stack_frame_t *p, *prev;
-    prev = NULL;
+    prev = os.root_frame;
     for ( p = os.root_frame; p; p = p->next ) {
         if ( p->ptr == func ) {
             prev->next = p->next;
+            if ( p->state == TaskDestroyable ) {
+                os.mem.free( ( uint32_t * )p );
+                os.mem.combine_free_blocks( );
+                return NULL;
+            }
             return p;
         }
         prev = p;
